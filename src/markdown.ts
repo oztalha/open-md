@@ -6,6 +6,7 @@ import githubAlerts from "markdown-it-github-alerts";
 import mathKatex from "@vscode/markdown-it-katex";
 import DOMPurify from "dompurify";
 import { bareDocLinks } from "./bareDocLinks";
+import { slugger } from "./slug";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { createHighlighter, bundledLanguages, type Highlighter, type BundledLanguage } from "shiki";
 
@@ -167,6 +168,20 @@ const md: MarkdownIt = new MarkdownIt({
 md.use(taskLists, { label: true }).use(footnote).use(emoji).use(githubAlerts);
 // Bare `methods.md` / `notes/plan.md` link to those files (not to http://methods.md).
 md.use(bareDocLinks);
+// Exported and published pages: headings get GitHub-style ids, so in-page
+// links (`[RC1](#rc1-…)`) work there. (The preview matches them on click.)
+md.core.ruler.push("heading_ids", (state) => {
+  if (!(state.env as { exporting?: boolean })?.exporting) return;
+  const slug = slugger();
+  state.tokens.forEach((token, i) => {
+    if (token.type !== "heading_open" || token.attrGet("id")) return;
+    const text = (state.tokens[i + 1]?.children ?? [])
+      .filter((c) => c.type === "text" || c.type === "code_inline")
+      .map((c) => c.content)
+      .join("");
+    token.attrSet("id", slug(text));
+  });
+});
 // LaTeX math via KaTeX: $inline$, $$display$$, and ```math fences (GitHub
 // syntax). Synchronous, so it fits the per-block render cache. Bad TeX renders
 // as a red error span instead of throwing.

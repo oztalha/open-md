@@ -5,6 +5,11 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Fixed
+- Links to a heading in the same document (`[RC1](#rc1-the-item-is-dropped)`,
+  GitHub-style) did nothing in the preview. They now scroll to the heading,
+  and exported and published pages give headings the same GitHub-style ids.
+
 ## [0.20.1] — 2026-10-26
 
 ### Changed

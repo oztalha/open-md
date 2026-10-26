@@ -12,6 +12,7 @@ import { renderJsonBlocks, renderJsonlBlocks } from "../json";
 import { codeLanguage, renderCodeBlocks } from "../code";
 import { useStore } from "../store";
 import { applyAnnotations, keyForDoc, subscribeAnnotations } from "../annotations";
+import { slugger } from "../slug";
 
 interface BlockRecord {
   html: string;
@@ -278,10 +279,23 @@ export function Preview({ docId, empty }: { docId: string; empty: boolean }) {
     if (!href) return;
     if (href.startsWith("#")) {
       // In-document links (footnotes, anchors) scroll within the preview.
+      // Headings have no ids here, so a GitHub-style heading link is matched
+      // by slugging the headings in order (repeats get -1, -2, like GitHub).
       const container = event.currentTarget as HTMLElement;
-      container
-        .querySelector(`[id="${CSS.escape(href.slice(1))}"]`)
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      let id = href.slice(1);
+      try {
+        id = decodeURIComponent(id);
+      } catch {
+        // keep it as written
+      }
+      const bare = id.replace(/^user-content-/, "");
+      const slug = slugger();
+      const target =
+        container.querySelector(`[id="${CSS.escape(id)}"]`) ??
+        [...container.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")].find(
+          (h) => slug(h.textContent ?? "") === bare.toLowerCase(),
+        );
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
     } else if (/^https?:\/\//i.test(href)) {
       void openUrl(href);
     } else if (/^mdviewer:\/\//i.test(href)) {
