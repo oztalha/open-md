@@ -5,6 +5,8 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.20.2] — 2026-10-26
+
 ### Fixed
 - Links to a heading in the same document (`[RC1](#rc1-the-item-is-dropped)`,
   GitHub-style) did nothing in the preview. They now scroll to the heading,
@@ -616,6 +618,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.20.2]: https://github.com/oztalha/open-md/releases/tag/v0.20.2
 [0.20.1]: https://github.com/oztalha/open-md/releases/tag/v0.20.1
 [0.20.0]: https://github.com/oztalha/open-md/releases/tag/v0.20.0
 [0.19.1]: https://github.com/oztalha/md-viewer/releases/tag/v0.19.1
