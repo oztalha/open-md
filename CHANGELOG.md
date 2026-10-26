@@ -5,6 +5,8 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.20.1] — 2026-10-26
+
 ### Changed
 - A new app icon for OpenMD: a page of markdown with an arrow out of its
   corner, in the app's yellow on dark. Its source is `app-icon.svg`.
@@ -609,6 +611,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.20.1]: https://github.com/oztalha/open-md/releases/tag/v0.20.1
 [0.20.0]: https://github.com/oztalha/open-md/releases/tag/v0.20.0
 [0.19.1]: https://github.com/oztalha/md-viewer/releases/tag/v0.19.1
 [0.19.0]: https://github.com/oztalha/md-viewer/releases/tag/v0.19.0
