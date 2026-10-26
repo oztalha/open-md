@@ -5,6 +5,10 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Changed
+- A new app icon for OpenMD: a page of markdown with an arrow out of its
+  corner, in the app's yellow on dark. Its source is `app-icon.svg`.
+
 ## [0.20.0] — 2026-10-26
 
 ### Changed
