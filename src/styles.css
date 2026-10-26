@@ -1,0 +1,3440 @@
+/* ---------------------------------------------------------------------------
+   Design tokens
+--------------------------------------------------------------------------- */
+
+:root {
+  --font-prose: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
+    sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  --titlebar-h: 38px;
+
+  --bg: #ffffff;
+  --bg-secondary: #f5f5f6;
+  --bg-elevated: #ffffff;
+  --fg: #1d1d1f;
+  --fg-muted: #73737a;
+  --fg-faint: #b3b3ba;
+  /* Accent used as text (links, caret, toggles): a dark amber, since yellow
+     on white is unreadable (#c99700 was 2.6:1; this is 5.3:1). Fills stay yellow. */
+  --accent: #8a6500;
+  /* Filled buttons: the dark theme's link blue is too pale behind white text. */
+  --button-primary: #f5c518;
+  /* Text on yellow fills; white is unreadable there. */
+  --on-accent: #1d1d1f;
+  --accent-soft: rgba(245, 197, 24, 0.15);
+  --border: rgba(0, 0, 0, 0.09);
+  --code-bg: rgba(0, 0, 0, 0.045);
+  /* Neutral, so it can't be confused with the yellow search-match highlights. */
+  --selection: rgba(120, 120, 128, 0.24);
+  --search-match: rgba(255, 200, 0, 0.35);
+  --search-match-selected: rgba(255, 150, 0, 0.5);
+
+  /* Syntax (Xcode-ish, light) */
+  --syn-keyword: #9b2393;
+  --syn-string: #c41a16;
+  --syn-comment: #707f8c;
+  --syn-number: #1c00cf;
+  --syn-func: #326d74;
+  --syn-type: #3900a0;
+  --syn-prop: #6c36a9;
+}
+
+:root[data-theme="dark"] {
+  --bg: #1e1e20;
+  --bg-secondary: #29292c;
+  --bg-elevated: #38383c;
+  --fg: #e8e8ea;
+  --fg-muted: #98989f;
+  --fg-faint: #5c5c64;
+  --accent: #ffd23f;
+  --button-primary: #ffc800;
+  --accent-soft: rgba(255, 210, 63, 0.14);
+  --border: rgba(255, 255, 255, 0.09);
+  --code-bg: rgba(255, 255, 255, 0.06);
+  --selection: rgba(255, 255, 255, 0.17);
+  --search-match: rgba(255, 200, 0, 0.25);
+  --search-match-selected: rgba(255, 160, 0, 0.45);
+  --syn-keyword: #fc5fa3;
+  --syn-string: #fc6a5d;
+  --syn-comment: #6c7986;
+  --syn-number: #d0bf69;
+  --syn-func: #67b7a4;
+  --syn-type: #5dd8ff;
+  --syn-prop: #a167e6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1e1e20;
+    --bg-secondary: #29292c;
+    --bg-elevated: #38383c;
+    --fg: #e8e8ea;
+    --fg-muted: #98989f;
+    --fg-faint: #5c5c64;
+    --accent: #ffd23f;
+    --button-primary: #ffc800;
+    --accent-soft: rgba(255, 210, 63, 0.14);
+    --border: rgba(255, 255, 255, 0.09);
+    --code-bg: rgba(255, 255, 255, 0.06);
+    --selection: rgba(255, 255, 255, 0.17);
+    --search-match: rgba(255, 200, 0, 0.25);
+    --search-match-selected: rgba(255, 160, 0, 0.45);
+
+    /* Syntax (Xcode-ish, dark) */
+    --syn-keyword: #fc5fa3;
+    --syn-string: #fc6a5d;
+    --syn-comment: #6c7986;
+    --syn-number: #d0bf69;
+    --syn-func: #67b7a4;
+    --syn-type: #5dd8ff;
+    --syn-prop: #a167e6;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Base
+--------------------------------------------------------------------------- */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-prose);
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--selection);
+}
+
+button {
+  font-family: inherit;
+}
+
+body.resizing-x,
+body.resizing-x * {
+  cursor: col-resize !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+body.resizing-y,
+body.resizing-y * {
+  cursor: row-resize !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------------------------------------------------------------------------
+   Title bar (overlay traffic lights on the left)
+--------------------------------------------------------------------------- */
+
+.titlebar {
+  height: var(--titlebar-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 10px 0 84px;
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.titlebar-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 45%;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+
+.titlebar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Remote host prefix shown before the filename in the title bar. */
+.titlebar-host {
+  flex: none;
+  color: var(--fg-faint);
+}
+
+.dirty-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+}
+
+.titlebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.titlebar-btn {
+  all: unset;
+  width: 30px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--fg-muted);
+}
+
+.titlebar-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--fg);
+}
+
+.titlebar-btn.active {
+  background: var(--bg-secondary);
+  color: var(--fg);
+}
+
+.mode-switch {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--bg-secondary);
+}
+
+.mode-switch button {
+  all: unset;
+  width: 32px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--fg-muted);
+}
+
+.mode-switch button:hover {
+  color: var(--fg);
+}
+
+.mode-switch button.active {
+  background: var(--bg-elevated);
+  color: var(--fg);
+  box-shadow:
+    0 0 0 0.5px var(--border),
+    0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* ---------------------------------------------------------------------------
+   Tab bar (browser-style, one row of open documents)
+--------------------------------------------------------------------------- */
+
+/* Drag-to-reorder (dragSort.ts): the held item lifts and follows the pointer,
+   the others glide aside. */
+body.sort-dragging,
+body.sort-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+.sort-shifting {
+  transition: transform 160ms ease;
+}
+.sort-held {
+  z-index: 10;
+  background: var(--bg-elevated) !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  opacity: 0.92;
+}
+body.sort-dragging [data-tip]:hover::after {
+  display: none;
+}
+.tabbar {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: 46px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tabbar-toggle {
+  all: unset;
+  flex: none;
+  width: 34px;
+  display: grid;
+  place-items: center;
+  color: var(--fg-muted);
+  cursor: default;
+}
+
+.tabbar-toggle:hover {
+  color: var(--fg);
+}
+
+.tabbar-sidebar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  margin-bottom: -1px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.tab-list {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  padding: 6px 0 0 6px;
+  /* Lets the active tab cover the bar's bottom border. */
+  margin-bottom: -1px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.tab-list::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  flex: 0 1 180px;
+  min-width: 90px;
+  max-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 12px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  cursor: default;
+  position: relative;
+  transition: background-color 0.12s, color 0.12s;
+}
+
+/* Thin divider between neighbouring inactive tabs. */
+.tab:not(:first-child)::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 25%;
+  bottom: 25%;
+  width: 1px;
+  background: var(--border);
+}
+
+.tab.active::before,
+.tab.active + .tab::before,
+.tab:hover::before,
+.tab:hover + .tab::before {
+  display: none;
+}
+
+.tab:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+
+.tab.active {
+  background: var(--bg);
+  color: var(--fg);
+  border-color: var(--border);
+}
+
+.tab.active .tab-name {
+  font-weight: 500;
+}
+
+.tab-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tab-name,
+.tab-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-meta {
+  font-size: 10px;
+  color: var(--fg-faint);
+}
+
+.tab .dirty-dot {
+  width: 6px;
+  height: 6px;
+}
+
+.tab-keycap {
+  flex: none;
+  min-width: 18px;
+  padding: 1px 3px;
+  /* System font, not mono: in the mono font O and 0 look alike. */
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+  color: var(--fg-faint);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.tab-close,
+.tab-new {
+  all: unset;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--fg-faint);
+  cursor: default;
+}
+
+.tab-close {
+  width: 16px;
+  height: 16px;
+  opacity: 0;
+}
+
+.tab:hover .tab-close,
+.tab.active .tab-close {
+  opacity: 1;
+}
+
+.tab-close:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+
+.tab-new {
+  width: 28px;
+  height: 28px;
+  align-self: center;
+  margin: 3px 6px 0 4px;
+  font-size: 15px;
+  color: var(--fg-muted);
+}
+
+.tab-new:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Workspace: sidebar + single active document
+--------------------------------------------------------------------------- */
+
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.tile-slot {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------------------
+   Sidebar (collapsible list of open documents)
+--------------------------------------------------------------------------- */
+
+.sidebar {
+  position: relative;
+  flex: none;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* Drag handle straddling the sidebar's right edge. */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 5;
+}
+.sidebar-resizer:hover {
+  background: var(--accent);
+  opacity: 0.35;
+}
+
+.sidebar-header {
+  flex: none;
+  padding: 8px 8px 6px 14px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+/* Open and Pinned are as tall as their contents; Recent takes the rest. */
+.sidebar-list {
+  flex: 0 1 auto;
+  overflow-y: auto;
+  padding-bottom: 10px;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 14px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  cursor: default;
+}
+
+.sidebar-item:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+
+.sidebar-item.active {
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.sidebar-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-item .dirty-dot {
+  width: 6px;
+  height: 6px;
+}
+
+.sidebar-close {
+  all: unset;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--fg-faint);
+  cursor: default;
+}
+
+.sidebar-close:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+
+/* ---------------------------------------------------------------------------
+   Tile (one document)
+--------------------------------------------------------------------------- */
+
+/* An image file opened on its own: centred, scaled down to fit, on a
+   checkerboard so transparency shows. */
+.preview-content .image-view {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+.preview-content .image-view img {
+  max-width: 100%;
+  height: auto;
+  background: repeating-conic-gradient(var(--code-bg) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
+  border-radius: 4px;
+}
+
+/* A remote document's image that couldn't be fetched. */
+.preview-content .img-missing {
+  display: inline-block;
+  padding: 4px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+/* Mermaid diagrams (```mermaid): centred, scaled down to fit the column. */
+.preview-content .mermaid-block {
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.preview-content .mermaid-block svg {
+  max-width: 100%;
+  height: auto;
+}
+.mermaid-error {
+  text-align: left;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  color: #e5484d;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.preview-content .mermaid-block .mermaid-source {
+  text-align: left;
+}
+
+/* Find and replace (⌘F): a compact bar over the top-right of the document,
+   VS Code style. The chevron reveals the replace row. */
+.tile {
+  position: relative;
+}
+.find-bar {
+  position: absolute;
+  top: 10px;
+  right: 18px;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 4px 6px 4px 2px;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  font-size: 12.5px;
+}
+.find-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.find-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.find-field {
+  display: flex;
+  align-items: center;
+  width: 250px;
+  padding: 0 2px 0 7px;
+  border-radius: 5px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.find-field:focus-within {
+  border-color: var(--accent);
+}
+.find-field.invalid {
+  border-color: #e5484d;
+}
+.find-field input {
+  all: unset;
+  flex: 1;
+  min-width: 0;
+  padding: 4px 0;
+  color: var(--fg);
+}
+.find-bar button {
+  all: unset;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--fg-muted);
+  cursor: default;
+}
+.find-bar button:hover:not(:disabled) {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+.find-bar button:disabled {
+  opacity: 0.35;
+}
+.find-bar .find-icon,
+.find-bar .find-chevron {
+  width: 24px;
+  height: 24px;
+}
+.find-chevron svg {
+  transition: transform 120ms;
+}
+.find-bar .find-opt {
+  height: 20px;
+  min-width: 22px;
+  padding: 0 3px;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+.find-bar .find-opt.on {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--button-primary) 18%, transparent);
+}
+.find-word {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.find-bar .find-text {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.find-count {
+  min-width: 70px;
+  padding: 0 6px;
+  text-align: right;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+::highlight(find-all) {
+  background-color: rgba(255, 213, 0, 0.35);
+}
+::highlight(find-current) {
+  background-color: rgba(255, 149, 0, 0.85);
+  color: #000;
+}
+
+/* "Changed on disk" bar: the file changed while there were unsaved edits. */
+.disk-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  color: var(--fg);
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+.disk-banner span {
+  flex: 1;
+  min-width: 0;
+}
+.disk-banner button {
+  all: unset;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: default;
+}
+.disk-banner button:first-of-type {
+  background: var(--button-primary);
+  border-color: transparent;
+  color: var(--on-accent);
+}
+
+.tile {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.tile-header {
+  height: 30px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 12px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--fg-faint);
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+
+body.tile-dragging,
+body.tile-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.tile-slot.drag-source {
+  opacity: 0.75;
+}
+
+.tile-drop-indicator {
+  position: absolute;
+  z-index: 60;
+  background: var(--accent-soft);
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  pointer-events: none;
+  transition:
+    left 90ms ease-out,
+    top 90ms ease-out,
+    width 90ms ease-out,
+    height 90ms ease-out;
+}
+
+.tile.focused .tile-header {
+  background: var(--bg);
+}
+
+.tile-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+
+.tile.focused .tile-title {
+  color: var(--fg);
+}
+
+.tile-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile-header .dirty-dot {
+  width: 6px;
+  height: 6px;
+}
+
+.remote-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+}
+
+.tile-close {
+  all: unset;
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--fg-faint);
+}
+
+.tile-close:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+
+.tile-body {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Document outline sidebar */
+.outline {
+  flex: none;
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.outline-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 6px 14px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.outline-close {
+  all: unset;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  font-size: 14px;
+  color: var(--fg-faint);
+}
+
+.outline-close:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+
+.outline-list {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 10px;
+}
+
+.outline-item {
+  all: unset;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 3px 12px 3px 10px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.outline-item:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+
+.outline-empty {
+  margin: 8px 14px;
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body:not(.resizing-x):not(.resizing-y) .pane {
+  transition:
+    flex-grow 180ms cubic-bezier(0.25, 0.6, 0.3, 1),
+    opacity 140ms ease-out;
+}
+
+.pane-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pane > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.pane-divider {
+  flex: none;
+  width: 1px;
+  position: relative;
+  z-index: 6;
+  background: var(--border);
+  cursor: col-resize;
+}
+
+.pane-divider::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+  cursor: col-resize;
+}
+
+/* ---------------------------------------------------------------------------
+   Editor (CodeMirror)
+--------------------------------------------------------------------------- */
+
+.editor {
+  height: 100%;
+}
+
+.editor .cm-editor {
+  height: 100%;
+}
+
+/* Word-style smooth caret: a quick glide between positions (kept short so it
+   never feels like it's lagging behind the keystroke). */
+.editor .cm-cursor {
+  transition:
+    left 50ms cubic-bezier(0.2, 0.8, 0.4, 1),
+    top 50ms cubic-bezier(0.2, 0.8, 0.4, 1);
+}
+
+html.no-caret-animation .editor .cm-cursor {
+  transition: none;
+}
+
+/* Frontmatter block in the editor: quiet mono metadata, never heading-sized. */
+.editor .cm-line.cm-frontmatter {
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+}
+
+.editor .cm-line.cm-frontmatter,
+.editor .cm-line.cm-frontmatter span {
+  font-size: calc(13px * var(--content-scale, 1)) !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+}
+
+.editor .cm-cursorLayer {
+  animation-timing-function: ease-in-out !important;
+}
+
+/* ---------------------------------------------------------------------------
+   Preview
+--------------------------------------------------------------------------- */
+
+.preview {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  /* Lets wide tables size against the pane (100cqw), not the text column. */
+  container-type: inline-size;
+}
+
+.preview:focus {
+  outline: none;
+}
+
+.preview-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--fg-faint);
+  font-size: 14px;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+}
+
+.preview-content {
+  max-width: var(--content-width, 44rem);
+  margin: 0 auto;
+  padding: 28px 32px 96px;
+  font-size: calc(15px * var(--content-scale, 1));
+  line-height: 1.65;
+  word-wrap: break-word;
+}
+
+/* Frontmatter properties card */
+.preview-content .frontmatter {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 18px;
+  margin: 0 0 1.5em;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.88em;
+}
+
+.preview-content .frontmatter-row {
+  display: contents;
+}
+
+.preview-content .frontmatter-key {
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+
+.preview-content .frontmatter-value {
+  overflow-wrap: anywhere;
+}
+
+.preview-content .frontmatter pre {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0;
+  background: none;
+  font-size: 0.95em;
+}
+
+/* GitHub-style alerts (> [!NOTE] …) */
+.preview-content .markdown-alert {
+  margin: 0.9em 0;
+  padding: 2px 0 2px 14px;
+  border-left: 3px solid var(--fg-faint);
+  color: var(--fg);
+}
+
+.preview-content .markdown-alert > :last-child {
+  margin-bottom: 0;
+}
+
+/* The body sits right under the title, not a paragraph gap below it. */
+.preview-content .markdown-alert-title + * {
+  margin-top: 0;
+}
+
+.preview-content .markdown-alert-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0.2em 0 0.4em;
+  font-weight: 600;
+  font-size: 0.95em;
+}
+
+.preview-content .markdown-alert-title svg {
+  fill: currentColor;
+}
+
+.preview-content .markdown-alert-note {
+  border-color: #4493f8;
+}
+.preview-content .markdown-alert-note .markdown-alert-title {
+  color: #4493f8;
+}
+.preview-content .markdown-alert-tip {
+  border-color: #3fb950;
+}
+.preview-content .markdown-alert-tip .markdown-alert-title {
+  color: #3fb950;
+}
+.preview-content .markdown-alert-important {
+  border-color: #ab7df8;
+}
+.preview-content .markdown-alert-important .markdown-alert-title {
+  color: #ab7df8;
+}
+.preview-content .markdown-alert-warning {
+  border-color: #d29922;
+}
+.preview-content .markdown-alert-warning .markdown-alert-title {
+  color: #d29922;
+}
+.preview-content .markdown-alert-caution {
+  border-color: #f85149;
+}
+.preview-content .markdown-alert-caution .markdown-alert-title {
+  color: #f85149;
+}
+
+/* Footnotes */
+.preview-content .footnotes {
+  margin-top: 2.5em;
+  font-size: 0.88em;
+  color: var(--fg-muted);
+}
+
+.preview-content .footnotes-sep {
+  margin: 2em 0 1em;
+}
+
+.preview-content .footnote-backref {
+  text-decoration: none;
+  margin-left: 4px;
+}
+
+.preview-content sup.footnote-ref a {
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.preview-content > :first-child {
+  margin-top: 0;
+}
+
+.preview-content h1,
+.preview-content h2,
+.preview-content h3,
+.preview-content h4,
+.preview-content h5,
+.preview-content h6 {
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  margin: 1.4em 0 0.5em;
+}
+
+.preview-content h1 {
+  font-size: 1.85em;
+  letter-spacing: -0.02em;
+}
+
+.preview-content h2 {
+  font-size: 1.45em;
+}
+
+.preview-content h3 {
+  font-size: 1.2em;
+}
+
+.preview-content h4 {
+  font-size: 1.05em;
+}
+
+.preview-content h5,
+.preview-content h6 {
+  font-size: 1em;
+}
+
+.preview-content h6 {
+  color: var(--fg-muted);
+}
+
+/* A paragraph break is a blank source line in the editor, which occupies one
+   full line box (line-height 1.65). Match that here so the preview keeps the
+   same vertical rhythm as the editor and the two panes stay aligned. */
+.preview-content p {
+  margin: 1.65em 0;
+}
+
+.preview-content a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.preview-content a:hover {
+  text-decoration: underline;
+}
+
+.preview-content code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: var(--code-bg);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+}
+
+.preview-content pre {
+  background: var(--code-bg);
+  border-radius: 8px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 0.9em 0;
+}
+
+.preview-content pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.85em;
+  line-height: 1.55;
+}
+
+.preview-content blockquote {
+  margin: 0.8em 0;
+  padding: 0.1em 0 0.1em 1em;
+  border-left: 3px solid var(--fg-faint);
+  color: var(--fg-muted);
+}
+
+.preview-content ul,
+.preview-content ol {
+  margin: 1.65em 0;
+  padding-left: 1.5em;
+}
+
+/* A sublist continues its parent item, so it hugs it (GitHub-style) instead of
+   getting the top-level list's paragraph-sized gap. */
+.preview-content li > ul,
+.preview-content li > ol {
+  margin: 0;
+}
+
+/* List items are contiguous source lines in the editor (no blank line between
+   them), so they get no extra vertical gap here either. */
+.preview-content li {
+  margin: 0;
+}
+
+.preview-content li::marker {
+  color: var(--fg-muted);
+}
+
+.preview-content ul.contains-task-list {
+  padding-left: 0.4em;
+  list-style: none;
+}
+
+/* Drawn by hand: the native read-only (disabled) checkbox is dimmed by WebKit,
+   and the link-blue accent was too pale to see the tick in dark mode. */
+.preview-content .task-list-item input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1em;
+  height: 1em;
+  margin: 0 0.5em 0 0;
+  vertical-align: -0.12em;
+  border: 1.5px solid var(--fg-faint);
+  border-radius: 4px;
+  background: transparent;
+  opacity: 1;
+}
+.preview-content .task-list-item input[type="checkbox"]:checked {
+  border-color: var(--button-primary);
+  background: var(--button-primary)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='%231d1d1f' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 85% no-repeat;
+}
+
+.preview-content table {
+  /* GitHub-style: size to content, never wider than the pane, scroll inside
+     itself when the content is genuinely wider. */
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.95em;
+}
+
+.preview-content th,
+.preview-content td {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  text-align: left;
+  /* Top-align so short cells line up with the start of long ones. */
+  vertical-align: top;
+}
+
+/* A table wider than the text column uses the whole pane width, centred, so
+   its columns aren't squeezed (it still scrolls inside itself if wider). */
+.preview-content table.table-wide {
+  max-width: calc(100cqw - 48px);
+  position: relative;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.preview-content th {
+  background: var(--bg-secondary);
+  font-weight: 600;
+}
+
+.preview-content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2em 0;
+}
+
+/* CSV / TSV table view */
+.preview-content .csv-meta {
+  margin: 0 0 0.8em;
+  font-size: 0.85em;
+  color: var(--fg-muted);
+}
+
+.preview-content table.csv-table {
+  font-size: 0.88em;
+}
+
+.preview-content table.csv-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-secondary);
+  white-space: nowrap;
+}
+
+.preview-content table.csv-table td {
+  vertical-align: top;
+  /* Long single-string values wrap instead of forcing an enormous column. */
+  max-width: 32em;
+  overflow-wrap: anywhere;
+}
+
+.preview-content img {
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+/* Inline HTML niceties (GitHub-style) */
+.preview-content kbd {
+  display: inline-block;
+  padding: 0.1em 0.45em;
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  line-height: 1.4;
+  color: var(--fg);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+}
+
+.preview-content details {
+  margin: 0.65em 0;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.preview-content details > summary {
+  cursor: default;
+  font-weight: 500;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.preview-content details[open] > summary {
+  margin-bottom: 0.4em;
+}
+
+.preview-content mark {
+  background: var(--search-match);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 0.15em;
+}
+
+.preview-content sub,
+.preview-content sup {
+  font-size: 0.75em;
+}
+
+/* shiki → dual-themed (github-light / github-dark) via CSS variables.
+   shiki emits each token's color as `--shiki-light` and `--shiki-dark` inline
+   custom properties; we pick the right one based on the active theme. The
+   block background stays --code-bg so it blends with the rest of the preview. */
+.preview-content pre.shiki {
+  background: var(--code-bg);
+}
+
+.preview-content .shiki,
+.preview-content .shiki span {
+  color: var(--shiki-light);
+}
+
+:root[data-theme="dark"] .preview-content .shiki,
+:root[data-theme="dark"] .preview-content .shiki span {
+  color: var(--shiki-dark);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .preview-content .shiki,
+  :root:not([data-theme="light"]) .preview-content .shiki span {
+    color: var(--shiki-dark);
+  }
+}
+
+/* JSONL: each record is its own block, so per-block numbers would restart at 1.
+   The record heading carries the file line instead. */
+.show-line-numbers .preview-content[data-jsonl] pre.shiki .line::before {
+  content: none;
+}
+/* JSONL record headings: the file line, small and dim beside its block. */
+.preview-content[data-jsonl] h6 {
+  margin: 14px 0 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--fg-faint);
+  border: 0;
+  padding: 0;
+}
+
+/* Line numbers (⇧⌘N) for highlighted code: a counter per shiki `.line`. */
+.show-line-numbers .preview-content pre.shiki code {
+  counter-reset: code-line;
+}
+.show-line-numbers .preview-content pre.shiki .line::before {
+  counter-increment: code-line;
+  content: counter(code-line);
+  display: inline-block;
+  min-width: 3ch;
+  margin-right: 1.5ch;
+  text-align: right;
+  color: var(--fg-faint) !important;
+  user-select: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Drop overlay
+--------------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------------
+   Tooltips (instant, styled, show keybinds)
+--------------------------------------------------------------------------- */
+
+[data-tip] {
+  position: relative;
+}
+
+[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  color: var(--fg);
+  font-size: 11.5px;
+  font-weight: 400;
+  font-style: normal;
+  text-decoration: none;
+  font-family: var(--font-prose);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  animation: tip-in 120ms ease-out 350ms forwards;
+}
+
+@keyframes tip-in {
+  to {
+    opacity: 1;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Image lightbox
+--------------------------------------------------------------------------- */
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.78);
+  cursor: zoom-out;
+  animation: fade-in 150ms ease-out;
+}
+
+.lightbox img {
+  max-width: 92vw;
+  max-height: 92vh;
+  border-radius: 8px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Settings panel
+--------------------------------------------------------------------------- */
+
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 350;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.35);
+  animation: fade-in 140ms ease-out;
+}
+
+.settings-panel {
+  width: min(560px, calc(100vw - 48px));
+  max-height: min(680px, calc(100vh - 80px));
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+  animation: pop-in 150ms ease-out;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px 10px;
+}
+
+.settings-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.settings-close {
+  all: unset;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  font-size: 16px;
+  color: var(--fg-muted);
+}
+
+.settings-close:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+
+.settings-body {
+  overflow-y: auto;
+  padding: 0 18px 18px;
+}
+
+.settings-body section {
+  margin-bottom: 18px;
+}
+
+.settings-body h3 {
+  margin: 14px 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-text-btn {
+  all: unset;
+  font-size: 12px;
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+
+.settings-text-btn:hover {
+  background: var(--accent-soft);
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  font-size: 13px;
+}
+
+.settings-segmented {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--bg-secondary);
+}
+
+.settings-segmented button {
+  all: unset;
+  padding: 3px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.settings-segmented button:hover {
+  color: var(--fg);
+}
+
+.settings-segmented button.active {
+  background: var(--bg-elevated);
+  color: var(--fg);
+  box-shadow:
+    0 0 0 0.5px var(--border),
+    0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.settings-keybind-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.settings-keybind-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-keybind-chip {
+  all: unset;
+  min-width: 72px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 12.5px;
+  background: var(--bg-secondary);
+  color: var(--fg);
+  border: 1px solid transparent;
+}
+
+.settings-keybind-chip:hover {
+  border-color: var(--border);
+}
+
+.settings-keybind-chip.recording {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.settings-keybind-chip.customized {
+  color: var(--accent);
+}
+
+.settings-keybind-reset {
+  all: unset;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--fg-faint);
+  font-size: 13px;
+}
+
+.settings-keybind-reset:not(:disabled):hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+
+.settings-keybind-reset:disabled {
+  opacity: 0.35;
+}
+
+.settings-input {
+  width: 220px;
+  padding: 4px 9px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--fg);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-note {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+
+.settings-note code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--code-bg);
+  padding: 0.05em 0.3em;
+  border-radius: 3px;
+}
+
+/* Remote file browser (Open Remote… / Save to Remote…) */
+.remote-browser {
+  width: min(680px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rb-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.rb-header .remote-prompt-label {
+  margin-bottom: 0;
+}
+.rb-hidden-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.rb-github-btn {
+  all: unset;
+  align-self: flex-start;
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: var(--fg);
+  cursor: default;
+}
+.rb-github-btn:hover {
+  background: var(--code-bg);
+}
+.rb-location {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.rb-location .remote-prompt-input {
+  width: auto;
+  padding: 6px 9px;
+  font-size: 12.5px;
+}
+.rb-location .rb-host {
+  /* Inputs have an intrinsic min width; pin it so the path gets the room. */
+  flex: 0 0 auto;
+  width: 9em;
+  min-width: 0;
+}
+/* github:owner/repo@branch is long; give it room. */
+.rb-location .rb-host.rb-host-github {
+  width: 45%;
+}
+.rb-location .rb-path {
+  flex: 1;
+  min-width: 0;
+}
+.rb-colon {
+  color: var(--fg-faint);
+  font-family: var(--font-mono);
+}
+.rb-icon-btn {
+  all: unset;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+  cursor: default;
+}
+.rb-icon-btn:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+.rb-list {
+  position: relative;
+  height: min(52vh, 440px);
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.rb-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--fg);
+  cursor: default;
+}
+.rb-row:hover {
+  background: var(--code-bg);
+}
+.rb-row.selected {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.rb-row svg {
+  flex: none;
+  color: var(--fg-muted);
+}
+.rb-row.rb-dir svg {
+  color: var(--accent);
+}
+.rb-row.selected svg {
+  color: var(--on-accent);
+}
+.rb-row.rb-other {
+  color: var(--fg-muted);
+}
+.rb-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rb-status {
+  padding: 14px 10px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+}
+.rb-missing {
+  margin: 0 0 10px;
+}
+.rb-create {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  font: inherit;
+  cursor: default;
+}
+.rb-create:hover {
+  border-color: var(--accent);
+}
+.rb-error {
+  color: #e5534b;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+/* Thin progress bar while a listing loads over SSH. */
+.rb-loading {
+  position: sticky;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent);
+  animation: fade-in 300ms ease-in-out infinite alternate;
+}
+.rb-save {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rb-save-label {
+  flex: none;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+.rb-save .remote-prompt-input {
+  padding: 6px 9px;
+  font-size: 13px;
+}
+.remote-browser .remote-prompt-actions {
+  align-items: center;
+  margin-top: 0;
+}
+.rb-where {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+/* "Open Remote…" prompt */
+.remote-prompt {
+  width: min(440px, calc(100vw - 48px));
+  padding: 18px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+  animation: pop-in 150ms ease-out;
+}
+
+.remote-prompt-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.remote-prompt-input {
+  width: 100%;
+  padding: 8px 11px;
+  font: inherit;
+  font-size: 14px;
+  font-family: var(--font-mono);
+  color: var(--fg);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.remote-prompt-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.remote-prompt-hint {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+
+.remote-prompt-hint code {
+  font-family: var(--font-mono);
+  background: var(--code-bg);
+  padding: 0.05em 0.3em;
+  border-radius: 3px;
+}
+
+.remote-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.remote-prompt-cancel,
+.remote-prompt-open {
+  all: unset;
+  padding: 5px 14px;
+  border-radius: 7px;
+  font-size: 13px;
+  cursor: default;
+}
+
+.remote-prompt-cancel {
+  color: var(--fg-muted);
+}
+
+.remote-prompt-cancel:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+
+.remote-prompt-open {
+  background: var(--button-primary);
+  color: var(--on-accent);
+  font-weight: 500;
+}
+
+.remote-prompt-open:not(:disabled):hover {
+  filter: brightness(1.1);
+}
+
+.remote-prompt-open:focus-visible,
+.remote-prompt-open:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.remote-prompt-open:disabled {
+  opacity: 0.4;
+}
+
+/* ---------------------------------------------------------------------------
+   Annotations (preview highlights + comments)
+--------------------------------------------------------------------------- */
+
+.preview-content span.annotation {
+  border-radius: 2px;
+  cursor: pointer;
+  transition: filter 100ms ease;
+}
+
+.preview-content span.annotation:hover {
+  filter: brightness(1.1);
+}
+
+.preview-content span.annotation.has-note {
+  border-bottom: 2px solid var(--accent);
+}
+
+.annotate-bar {
+  position: fixed;
+  z-index: 320;
+  /* Vertical placement (and viewport clamping/flip) is resolved in JS; only
+     center horizontally on the anchor here. */
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 7px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.22);
+  animation: pop-in 110ms ease-out;
+}
+
+.annotate-swatch {
+  all: unset;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.annotate-swatch.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.annotate-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 2px;
+}
+
+.annotate-comment {
+  all: unset;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.annotate-comment:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+
+.annotate-popover {
+  position: fixed;
+  z-index: 320;
+  width: 240px;
+  padding: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+  animation: pop-in 110ms ease-out;
+}
+
+.annotate-note {
+  width: 100%;
+  min-height: 56px;
+  resize: vertical;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--fg);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-sizing: border-box;
+}
+
+.annotate-note:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.annotate-popover-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.annotate-colors {
+  display: flex;
+  gap: 5px;
+}
+
+.annotate-delete {
+  all: unset;
+  font-size: 12px;
+  color: #f85149;
+  padding: 2px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.annotate-delete:hover {
+  background: rgba(248, 81, 73, 0.12);
+}
+
+/* ---------------------------------------------------------------------------
+   Drop overlay
+--------------------------------------------------------------------------- */
+
+.drop-overlay {
+  position: fixed;
+  inset: 8px;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 500;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Selection formatting bar (CodeMirror tooltip)
+--------------------------------------------------------------------------- */
+
+.cm-tooltip.cm-format-bar {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.16);
+  animation: pop-in 120ms ease-out;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+.cm-format-btn {
+  all: unset;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+
+.cm-format-btn:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+
+.cm-format-btn.fmt-bold {
+  font-weight: 700;
+}
+
+.cm-format-btn.fmt-italic {
+  font-style: italic;
+}
+
+.cm-format-btn.fmt-strike {
+  text-decoration: line-through;
+}
+
+.cm-format-btn.fmt-code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------------------
+   Table picker (GitHub-style grid)
+--------------------------------------------------------------------------- */
+
+.table-button {
+  position: relative;
+  display: flex;
+}
+
+.table-picker {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  z-index: 200;
+  padding: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.2);
+  animation: pop-in 130ms ease-out;
+}
+
+.table-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 16px);
+  grid-auto-rows: 16px;
+  gap: 3px;
+}
+
+.table-cell {
+  all: unset;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.table-cell.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.table-picker-label {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* About window */
+.about-dialog {
+  width: min(360px, calc(100vw - 48px));
+  padding: 26px 24px 20px;
+  text-align: center;
+}
+.about-icon {
+  width: 88px;
+  height: 88px;
+}
+.about-name {
+  margin: 8px 0 2px;
+  font-size: 17px;
+  font-weight: 700;
+}
+.about-version {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.about-tagline {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.about-links {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--fg-faint);
+}
+.about-links a {
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+.about-links a:hover {
+  text-decoration: underline;
+}
+/* Published documents */
+.published-dialog {
+  width: min(640px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.published-dialog .remote-prompt-label {
+  margin-bottom: 0;
+}
+.pub-list {
+  height: min(56vh, 480px);
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.pub-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+.pub-row + .pub-row {
+  border-top: 1px solid var(--border);
+}
+.pub-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.pub-source {
+  all: unset;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+  cursor: default;
+}
+.pub-source:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.pub-meta {
+  font-size: 11.5px;
+  color: var(--fg-faint);
+}
+.pub-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.pub-password {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+.pub-password .publish-edit {
+  margin-right: 0;
+  padding: 0;
+  font-size: 12px;
+}
+.pub-note {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.pub-link a {
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Publish dialog */
+.publish-dialog {
+  width: min(460px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.publish-dialog .remote-prompt-label {
+  margin-bottom: 0;
+}
+.publish-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.publish-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: default;
+}
+.publish-target:hover {
+  background: var(--code-bg);
+}
+.publish-target.selected {
+  background: var(--code-bg);
+}
+.publish-target input {
+  margin: 0;
+}
+.publish-target-label {
+  flex: 1;
+}
+.publish-target-link {
+  font-size: 11.5px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.publish-target-link:hover {
+  text-decoration: underline;
+}
+.publish-target-new {
+  font-size: 11.5px;
+  color: var(--fg-faint);
+}
+.publish-link-existing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.publish-link-existing .remote-prompt-input {
+  flex: 1;
+  min-width: 0;
+}
+.publish-link-existing .publish-status {
+  flex-basis: 100%;
+}
+.publish-link-toggle {
+  align-self: flex-start;
+}
+.publish-asnew {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.publish-status {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.publish-done a {
+  color: var(--accent);
+}
+.publish-dialog .remote-prompt-actions {
+  margin-top: 0;
+}
+.publish-edit {
+  all: unset;
+  margin-right: auto;
+  padding: 5px 0;
+  font-size: 12.5px;
+  color: var(--accent);
+  cursor: default;
+}
+.publish-edit:hover {
+  text-decoration: underline;
+}
+.publish-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+.publish-current a {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+  text-decoration: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.publish-current a:hover {
+  text-decoration: underline;
+}
+.publish-copy {
+  all: unset;
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  cursor: default;
+}
+.publish-copy:hover {
+  color: var(--fg);
+  background: var(--code-bg);
+}
+.publish-when {
+  flex: none;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+/* Publish dialog: the published copy, access and password rows, ⋯ More */
+.publish-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+.publish-head .remote-prompt-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.publish-head .select {
+  flex: none;
+  align-self: center;
+}
+.publish-head .select select {
+  min-width: 0;
+}
+.publish-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 6px 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.publish-card-link {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.publish-card-link a {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+  text-decoration: none;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.publish-card-link a:hover {
+  text-decoration: underline;
+}
+.publish-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.publish-meta-spacer {
+  flex: 1;
+}
+.publish-switch {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 6px;
+  cursor: default;
+}
+.publish-switch i {
+  position: relative;
+  width: 24px;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--fg-faint);
+  transition: background 0.15s;
+}
+.publish-switch i::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+.publish-switch.on i {
+  background: var(--button-primary);
+}
+.publish-switch.on i::after {
+  transform: translateX(10px);
+}
+.publish-rows {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+}
+.publish-rows > * {
+  justify-self: start;
+}
+.publish-key {
+  color: var(--fg-muted);
+}
+.publish-note {
+  grid-column: 2;
+  margin: -4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #b26a00;
+}
+.publish-seg {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.publish-seg button {
+  all: unset;
+  padding: 3px 12px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  cursor: default;
+}
+.publish-seg button.on {
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+/* Field, New and copy share one height. */
+.publish-rows > .publish-pw {
+  justify-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.publish-pw-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.publish-pw .remote-prompt-input,
+.publish-pw .rb-github-btn,
+.publish-pw .copy-btn {
+  box-sizing: border-box;
+  height: 28px;
+}
+.publish-pw .remote-prompt-input {
+  width: 100%;
+  padding: 4px 30px 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.publish-pw .rb-github-btn {
+  display: inline-flex;
+  align-items: center;
+  align-self: auto;
+  padding: 0 10px;
+}
+.publish-pw .copy-btn {
+  width: 28px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.publish-eye {
+  all: unset;
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: var(--fg-muted);
+  cursor: default;
+}
+.publish-eye:hover {
+  color: var(--fg);
+  background: var(--code-bg);
+}
+.publish-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.publish-checks .publish-asnew {
+  font-size: 13px;
+  color: var(--fg);
+}
+.publish-hint {
+  color: var(--fg-faint);
+  font-size: 12px;
+  cursor: help;
+}
+.publish-more-wrap {
+  position: relative;
+  margin-right: auto;
+}
+.publish-more {
+  all: unset;
+  padding: 5px 8px;
+  border-radius: 7px;
+  font-size: 13px;
+  color: var(--fg-muted);
+  cursor: default;
+}
+.publish-more:hover,
+.publish-more.open {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+.publish-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 1;
+  min-width: 230px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+.publish-menu button {
+  all: unset;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: default;
+}
+.publish-menu button:hover {
+  background: var(--accent-soft);
+}
+.publish-menu .danger {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 6px 6px;
+  color: #e5534b;
+}
+
+/* Title-bar publish button */
+.publish-btn {
+  position: relative;
+}
+.publish-dot {
+  position: absolute;
+  top: 3px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.publish-dot-error {
+  background: #e5534b;
+}
+
+/* ⌘-held shortcut badges under title-bar buttons */
+.titlebar-btn,
+.mode-switch button {
+  position: relative;
+}
+.btn-keycap {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elevated, var(--bg-secondary));
+  color: var(--fg-muted);
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Secondary "Open ↗" in the Publish dialog */
+.publish-open {
+  all: unset;
+  padding: 5px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--fg);
+  cursor: default;
+}
+.publish-open:hover {
+  background: var(--code-bg);
+}
+
+/* Sidebar: Open (top) and Recent (below a divider) */
+.sidebar > .sidebar-list:first-of-type {
+  flex: 0 1 auto;
+  max-height: 50%;
+}
+.sidebar-recent {
+  flex: 1 1 auto;
+}
+.sidebar-divider {
+  flex: none;
+  height: 1px;
+  margin: 6px 12px;
+  background: var(--border);
+}
+.sidebar-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sidebar-clear {
+  all: unset;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--fg-faint);
+  cursor: default;
+}
+.sidebar-clear:hover {
+  color: var(--fg);
+}
+.sidebar-hint {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+.sidebar-item .sidebar-close {
+  visibility: hidden;
+}
+.sidebar-item:hover .sidebar-close,
+.sidebar-item.active .sidebar-close {
+  visibility: visible;
+}
+
+/* Sidebar: Files | Outline switch */
+.sidebar-tabs {
+  display: flex;
+  flex: 1;
+  gap: 2px;
+  margin: 0 10px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--code-bg);
+}
+.sidebar-tabs button {
+  all: unset;
+  flex: 1;
+  padding: 5px 0;
+  border-radius: 7px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  cursor: default;
+}
+.sidebar-tabs button:hover {
+  color: var(--fg);
+}
+.sidebar-tabs button.active {
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+.sidebar .outline-list {
+  flex: 1;
+  padding-top: 8px;
+}
+.sidebar-tab-keycap {
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+/* Icon copy button (remote browser path, Publish dialog link) */
+.copy-btn {
+  all: unset;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--fg-muted);
+  cursor: default;
+}
+.copy-btn:hover:not(:disabled) {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+.copy-btn:disabled {
+  opacity: 0.4;
+}
+
+/* Open and Recent rows: the host hint sits flush right (aligned with
+   "Clear"); on hover the ✕ takes its place instead of pushing it left. */
+.sidebar-recent-item,
+.sidebar-open-item {
+  position: relative;
+}
+/* Pinned files: a small pin badge, and the ✕ slot holds an unpin button. */
+.pin-badge {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--fg-faint);
+}
+.sidebar-pin-item:hover .sidebar-close {
+  color: var(--accent);
+}
+
+/* Grip (⋮⋮) in the left margin on hover: open files can be dragged to reorder. */
+.sidebar-grip {
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  margin: auto 0;
+  width: 6px;
+  height: 10px;
+  opacity: 0;
+  background-image: radial-gradient(circle, var(--fg-faint) 1px, transparent 1.2px);
+  background-size: 3px 3.33px;
+  transition: opacity 120ms;
+}
+.sidebar-pin-item:hover .sidebar-grip,
+.sidebar-recent-row:hover .sidebar-grip,
+.sidebar-open-item:hover .sidebar-grip,
+.sort-held .sidebar-grip {
+  opacity: 1;
+}
+
+/* Swapped with opacity, not visibility: WebKit left half-painted hints
+   ("dd2" for "cdd2") when visibility flipped on an overlapping element. */
+.sidebar-recent-item .sidebar-close,
+.sidebar-open-item .sidebar-close {
+  position: absolute;
+  right: 8px;
+  top: 0;
+  bottom: 0;
+  margin: auto 0;
+  visibility: visible;
+  opacity: 0;
+  pointer-events: none;
+}
+.sidebar-recent-item:hover .sidebar-close,
+.sidebar-open-item:hover .sidebar-close,
+.sidebar-open-item.active:not(:has(.sidebar-hint, .dirty-dot)) .sidebar-close {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* The unsaved dot sits where the ✕ appears (no host hint): swap them on hover. */
+.sidebar-open-item:not(:has(.sidebar-hint)) .dirty-dot {
+  margin-right: 5px;
+}
+.sidebar-open-item:hover:not(:has(.sidebar-hint)) .dirty-dot {
+  opacity: 0;
+}
+/* The list scrolls, so a tooltip below the row would be clipped: show the
+   ✕'s tooltip to its left, inside the sidebar. */
+.sidebar-item .sidebar-close[data-tip]:hover::after {
+  top: 50%;
+  left: auto;
+  right: calc(100% + 6px);
+  transform: translateY(-50%);
+}
+.sidebar-recent-item:hover .sidebar-hint,
+.sidebar-open-item:hover .sidebar-hint {
+  opacity: 0;
+}
+
+/* Breadcrumbs: the full current folder, each part clickable to jump up. */
+.rb-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  min-height: 20px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.rb-crumb {
+  all: unset;
+  padding: 1px 4px;
+  border-radius: 4px;
+  cursor: default;
+}
+.rb-crumb:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+.rb-crumb.current {
+  color: var(--fg);
+  font-weight: 600;
+}
+.rb-crumb-host {
+  padding: 1px 4px;
+  color: var(--accent);
+}
+.rb-crumb-sep {
+  color: var(--fg-faint);
+}
+
+/* Briefly highlight the block jumped to via path:LINE. */
+.preview-content .reveal-flash {
+  background: var(--accent-soft);
+  border-radius: 4px;
+  transition: background 0.8s ease-out;
+}
+
+/* Publish targets editor */
+.targets-editor {
+  width: min(760px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.te-body {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 14px;
+  height: min(460px, calc(100vh - 220px));
+}
+.te-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  padding-right: 10px;
+  border-right: 1px solid var(--border);
+}
+.te-item,
+.te-add,
+.te-example,
+.te-remove {
+  all: unset;
+  cursor: default;
+}
+.te-item,
+.te-add {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  font-size: 12.5px;
+}
+.te-item:hover,
+.te-add:hover {
+  background: var(--code-bg);
+}
+.te-item.selected,
+.te-add.selected {
+  background: var(--selection);
+}
+.te-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.te-item-kind {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--fg-faint);
+}
+.te-add {
+  margin-top: 4px;
+  color: var(--accent);
+}
+.te-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.te-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.te-field-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.te-field .remote-prompt-input {
+  font-size: 12.5px;
+  padding: 6px 9px;
+}
+.te-code {
+  resize: vertical;
+  line-height: 1.45;
+}
+.te-hint,
+.te-help {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.te-example {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.te-example:hover {
+  background: var(--code-bg);
+}
+.te-example-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.te-example-about {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.te-server {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.te-server-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+.te-remove {
+  align-self: flex-start;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #e5534b;
+}
+.te-remove:hover {
+  text-decoration: underline;
+}
+
+/* Dropdown (components/Select.tsx): a native select in theme colors. */
+.select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  max-width: 100%;
+  color: var(--fg-muted);
+}
+.select select {
+  appearance: none;
+  -webkit-appearance: none;
+  min-width: 140px;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 28px 0 10px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--fg);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  text-overflow: ellipsis;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.select select:hover:not(:disabled) {
+  background: var(--code-bg);
+}
+.select select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.select.disabled select {
+  color: var(--fg-muted);
+  opacity: 0.75;
+}
+.select-chevron {
+  position: absolute;
+  right: 10px;
+  pointer-events: none;
+}
+
+/* Publish: password row for protected pages */
+.publish-password {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.publish-password-label {
+  flex: none;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.publish-password .remote-prompt-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 9px;
+  font-size: 12.5px;
+}
+
+/* Protected page: waiting for the GitHub Pages build */
+.publish-waiting::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 7px;
+  vertical-align: -1px;
+  border: 1.5px solid var(--fg-faint);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Publish: a publish going on with the dialog closed (below dialogs) */
+.publish-progress {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 330;
+  width: min(380px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.22);
+  font-size: 12.5px;
+  animation: pop-in 140ms ease-out;
+}
+.publish-progress-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.publish-progress-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.publish-progress-spin {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--fg-faint);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+.publish-progress-sub {
+  color: var(--fg-muted);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.publish-progress-close {
+  all: unset;
+  flex: none;
+  padding: 0 4px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--fg-muted);
+  cursor: default;
+}
+.publish-progress-close:hover {
+  color: var(--fg);
+}
+
+/* Publish: take a published copy down */
+.publish-unpublish {
+  all: unset;
+  align-self: flex-start;
+  font-size: 12px;
+  color: #e5534b;
+  cursor: default;
+}
+.publish-unpublish:hover {
+  text-decoration: underline;
+}
+
+/* Checkboxes and radio buttons in theme colors, like the dropdown (the native
+   ones stay macOS blue). The preview's task-list boxes have their own rule. */
+input[type="checkbox"],
+input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  border: 1.5px solid var(--fg-faint);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+input[type="radio"] {
+  border-radius: 50%;
+}
+input[type="checkbox"]:hover:not(:disabled),
+input[type="radio"]:hover:not(:disabled) {
+  border-color: var(--fg-muted);
+}
+input[type="checkbox"]:checked {
+  border-color: var(--button-primary);
+  background: var(--button-primary)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='%231d1d1f' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 85% no-repeat;
+}
+input[type="radio"]:checked {
+  border-color: var(--button-primary);
+  background: radial-gradient(var(--button-primary) 0 42%, transparent 48%) var(--bg-secondary);
+}
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled {
+  opacity: 0.5;
+}

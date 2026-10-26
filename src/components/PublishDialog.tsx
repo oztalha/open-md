@@ -1,0 +1,875 @@
+import { useEffect, useRef, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { useStore } from "../store";
+import {
+  confirmUnpublish,
+  ghAccounts,
+  pagesPasswordGet,
+  pagesStatus,
+  publishTargets,
+} from "../ipc";
+import { generatePassword, MIN_PASSWORD } from "../pageCrypt";
+import type { PublishTarget } from "../ipc";
+import {
+  isGithubDoc,
+  isListed,
+  linkExistingPage,
+  linkedDocs,
+  publishErrorKey,
+  publishedFor,
+  resolveRealKey,
+  setSync,
+  unpublish,
+  verifyPublished,
+} from "../publish";
+import { keyForDoc } from "../annotations";
+import { startPublish } from "../publishJob";
+import type { PublishJob } from "../publishJob";
+import { displayTitle } from "../types";
+import { CopyButton } from "./CopyButton";
+import { ExternalIcon, EyeIcon, EyeOffIcon } from "./icons";
+import { Select } from "./Select";
+
+const LAST_TARGET_KEY = "publishLastTarget";
+const LINKED_KEY = "publishLinked";
+const ACCOUNT_KEY = "publishGistAccount";
+
+function timeAgo(at: number): string {
+  const min = Math.round((Date.now() - at) / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `${h} h ago`;
+  return new Date(at).toLocaleDateString();
+}
+
+type Status =
+  | { kind: "idle" }
+  | { kind: "busy"; label: string; detail?: string; title?: string }
+  | {
+      kind: "done";
+      url: string;
+      updated: boolean;
+      label: string;
+      linked: number;
+      skipped: string[];
+      /** GitHub Pages: proves the host serves this version (pagesLive). */
+      marker?: string;
+      /** GitHub Pages: published with a password. */
+      locked?: boolean;
+      indexUrl?: string;
+      indexError?: string;
+    }
+  | { kind: "removed"; label: string; deleted: boolean }
+  | { kind: "error"; message: string };
+
+/** The dialog's view of the store's publish job. */
+function jobStatus(job: PublishJob, docId: string | undefined): Status {
+  const st = job.status;
+  if (st.kind === "busy")
+    return {
+      kind: "busy",
+      label: job.label,
+      detail: st.detail,
+      title: job.docId === docId ? undefined : job.title,
+    };
+  if (st.kind === "error") return st;
+  return { ...st, label: job.label };
+}
+
+/** File → Publish… (⇧⌘P): pick a target; the link is copied when done. */
+export function PublishDialog() {
+  const open = useStore((s) => s.publishOpen);
+  return open ? <Publish /> : null;
+}
+
+function Publish() {
+  const close = () => useStore.getState().setPublishOpen(false);
+  const doc = useStore((s) => s.docs[s.activeId]);
+  const [targets, setTargets] = useState<PublishTarget[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string>(localStorage.getItem(LAST_TARGET_KEY) ?? "");
+  // Pasting the link of a page published before, so this updates it.
+  const [linking, setLinking] = useState(false);
+  const [linkDraft, setLinkDraft] = useState("");
+  const [linkError, setLinkError] = useState<string | null>(null);
+  // On unless turned off once: otherwise links to local files break once published.
+  const [withLinked, setWithLinked] = useState(localStorage.getItem(LINKED_KEY) !== "0");
+  // GitHub documents start kept in sync; the switch on the published copy changes it.
+  const [syncNew, setSyncNew] = useState(true);
+  // The ⋯ More menu: rarer actions (new copy, link a page, targets, unpublish).
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuOpenRef = useRef(false);
+  menuOpenRef.current = menuOpen;
+  // Unpublishing and linking; publishing itself is the store's job, which
+  // outlives the dialog.
+  const [localStatus, setStatus] = useState<Status>({ kind: "idle" });
+  // Set while (and after) removing a page: the dialog then shows that, not
+  // the last publish job's result, so a finished job's error can't hide it.
+  const [removalShown, setRemovalShown] = useState(false);
+  // gh accounts for gists: the last one picked if still logged in, else gh's active one.
+  const [accounts, setAccounts] = useState<{
+    logins: string[];
+    active: string | null;
+  } | null>(null);
+  const [account, setAccount] = useState("");
+  useEffect(() => {
+    ghAccounts()
+      .then((list) => {
+        setAccounts(list);
+        const last = localStorage.getItem(ACCOUNT_KEY) ?? "";
+        setAccount(list.logins.includes(last) ? last : (list.active ?? list.logins[0] ?? ""));
+      })
+      .catch(() => setAccounts({ logins: [], active: null })); // no gh: publishing shows the real error
+  }, []);
+  const tick = useStore((s) => s.publishTick);
+  const records = publishedFor(doc, tick);
+  const linked = linkedDocs(doc);
+
+  // Switching documents while the dialog is open starts fresh; a previous
+  // document's result would otherwise show as if it were this one's.
+  const docId = doc?.id;
+  // A finished publish is old news once seen here: drop it on open (it ended
+  // while closed) and on close (the corner indicator would repeat it).
+  useEffect(() => {
+    const clearSettled = () => {
+      const job = useStore.getState().publishJob;
+      if (job && job.status.kind !== "busy" && job.live !== "waiting")
+        useStore.getState().setPublishJob(null);
+    };
+    clearSettled();
+    return clearSettled;
+  }, []);
+  useEffect(() => {
+    void resolveRealKey(useStore.getState().docs[docId ?? ""]);
+    setStatus((cur) => (cur.kind === "busy" ? cur : { kind: "idle" }));
+    void verifyPublished(useStore.getState().docs[docId ?? ""], true);
+    setLinking(false);
+    setRemovalShown(false);
+  }, [docId]);
+
+  const load = () =>
+    publishTargets()
+      .then((list) => {
+        setTargets(list);
+        setLoadError(null);
+        setSelected((cur) => (list.some((t) => t.id === cur) ? cur : (list[0]?.id ?? "")));
+      })
+      .catch((err) => setLoadError(String(err)));
+
+  // Latest publish(), for the window-level Enter handler below.
+  const publishRef = useRef<() => void>(() => {});
+  const openSavedRef = useRef<() => void>(() => {});
+  const publishButton = useRef<HTMLButtonElement | null>(null);
+
+  // Targets (re)load on open and after the targets editor closes.
+  const editingTargets = useStore((s) => s.targetsEditorOpen);
+  useEffect(() => {
+    if (!editingTargets) void load();
+  }, [editingTargets]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      // The targets editor is on top and handles its own keys.
+      if (useStore.getState().targetsEditorOpen) return;
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        if (menuOpenRef.current) setMenuOpen(false);
+        else useStore.getState().setPublishOpen(false);
+        return;
+      }
+      if (event.key !== "Enter") return;
+      // ⌘↩ opens the selected target's saved link, without publishing.
+      if (event.metaKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        openSavedRef.current();
+        return;
+      }
+      // Enter runs the primary button (Publish/Update, then Open) from anywhere
+      // in the dialog, and never reaches the editor underneath. On a focused
+      // button or link, let that element handle it natively.
+      const el = event.target as HTMLElement | null;
+      if (el?.closest("button, a, .publish-link-existing")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      publishRef.current();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, []);
+
+  const target = targets?.find((t) => t.id === selected);
+  const existing = target ? records[target.id] : undefined;
+  const docKey = keyForDoc(doc);
+  const syncError = useStore((s) =>
+    target && docKey ? s.publishErrors[publishErrorKey(docKey, target.id)] : undefined,
+  );
+  // The running publish shows whatever document is open (one at a time); a
+  // finished one only for its own document and target.
+  const job = useStore((s) => s.publishJob);
+  const jobShown =
+    job && (job.status.kind === "busy" || (job.docId === docId && job.targetId === selected))
+      ? job
+      : null;
+  const status: Status = jobShown && !removalShown ? jobStatus(jobShown, docId) : localStatus;
+  const busy = status.kind === "busy";
+  // Only removing a page keeps the dialog open; a publish carries on closed.
+  const removing = localStatus.kind === "busy";
+  // Targets whose links carry the page id (so a pasted link can be linked).
+  // Linking needs somewhere to keep the record: a saved file.
+  const canLink =
+    !!target &&
+    !!keyForDoc(doc) &&
+    (target.kind !== "mcp" || !!target.urlTemplate?.includes("{id}"));
+
+  const linkPage = () => {
+    if (!doc || !target) return;
+    try {
+      linkExistingPage(doc, target, linkDraft);
+      setLinking(false);
+      setLinkDraft("");
+      setLinkError(null);
+      setStatus({ kind: "idle" });
+      publishButton.current?.focus();
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  // GitHub Pages: with a password unless turned off; an update keeps the
+  // page's mode. Listing on the index starts on for public pages, off for
+  // protected ones, and follows the password choice until set by hand.
+  const pagesTarget = target?.kind === "pages";
+  const updatingPage = !!existing;
+  const [requirePassword, setRequirePassword] = useState(true);
+  const [listed, setListed] = useState(false);
+  // Set by hand: the password choice and the index read stop changing it.
+  const listedTouched = useRef(false);
+  const existingId = existing?.id;
+  useEffect(() => {
+    const locked = updatingPage ? !existing?.open : true;
+    setRequirePassword(locked);
+    setListed(updatingPage ? !!existing?.listed : !locked);
+    listedTouched.current = false;
+    if (!pagesTarget || !updatingPage || !existingId) return;
+    // The index in the repo decides: it may have been listed from another Mac.
+    let live = true;
+    isListed(existingId, existing?.account)
+      .then((on) => live && setListed((cur) => (listedTouched.current ? cur : on)))
+      .catch(() => {}); // offline: keep this Mac's record
+    return () => {
+      live = false;
+    };
+  }, [pagesTarget, existingId, updatingPage, docId]);
+  const changeRequirePassword = (on: boolean) => {
+    setRequirePassword(on);
+    if (!listedTouched.current && !updatingPage) setListed(!on);
+  };
+
+  // Password-protected pages: a strong generated password for a new page, the
+  // saved one (Keychain) for an existing page, so republishing changes nothing.
+  const protectedPage = pagesTarget && requirePassword;
+  const [password, setPassword] = useState("");
+  const [savedPassword, setSavedPassword] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [pagesRepo, setPagesRepo] = useState<{
+    repo: string;
+    exists: boolean;
+  } | null>(null);
+  // Switching a public page to a password makes a new page: no saved password to load.
+  const pageId = protectedPage && existing && !existing.open ? existing.id : null;
+  useEffect(() => {
+    if (!protectedPage) return;
+    setSavedPassword(null);
+    if (!pageId) {
+      setPassword(generatePassword());
+      return;
+    }
+    let live = true;
+    pagesPasswordGet(pageId)
+      .then((saved) => {
+        if (!live) return;
+        setSavedPassword(saved);
+        setPassword(saved ?? "");
+      })
+      .catch(() => live && setPassword(""));
+    return () => {
+      live = false;
+    };
+  }, [protectedPage, pageId, docId]);
+  // Whether the first publish will create the repo (said in the dialog).
+  const pagesAccount = updatingPage
+    ? (existing?.account ?? null)
+    : account || null;
+  useEffect(() => {
+    if (!pagesTarget || updatingPage) return setPagesRepo(null);
+    let live = true;
+    pagesStatus(pagesAccount)
+      .then((st) => live && setPagesRepo(st))
+      .catch(() => live && setPagesRepo(null));
+    return () => {
+      live = false;
+    };
+  }, [pagesTarget, pagesAccount, updatingPage]);
+  const passwordTooShort = protectedPage && password.length < MIN_PASSWORD;
+  // An unsaved document can't remember its page: each publish would make a new
+  // page with a new password. Saving first keeps one page and one password.
+  const needsSaveFirst = protectedPage && !keyForDoc(doc);
+
+  /** `copy`: a separate new page/gist instead of updating the published one. */
+  const publish = (copy = false) => {
+    if (!doc || !target || busy || passwordTooShort || needsSaveFirst) return;
+    localStorage.setItem(LAST_TARGET_KEY, target.id);
+    setStatus({ kind: "idle" });
+    setRemovalShown(false);
+    void startPublish(doc, target, {
+      asNew: copy,
+      linked: withLinked && linked.length > 0,
+      account:
+        target.kind === "gist" || target.kind === "pages"
+          ? account || undefined
+          : undefined,
+      password: protectedPage ? password : undefined,
+      open: pagesTarget ? !requirePassword : undefined,
+      listed: pagesTarget ? listed : undefined,
+      sync: !existing && isGithubDoc(doc) ? syncNew : undefined,
+      locked: protectedPage,
+    });
+    // The corner indicator (PublishProgress) follows it from here, out of the way.
+    close();
+  };
+  // Open a published page in the browser and close the dialog.
+  const openAndClose = (url: string) => {
+    void openUrl(url);
+    close();
+  };
+
+  // GitHub Pages goes live after a build (publishJob waits for it); Open is
+  // offered once it serves this version, so the link never looks broken.
+  const live = jobShown?.live ?? null;
+  const waitingForPages = live === "waiting";
+
+  const takeDown = async () => {
+    if (!doc || !target || !existing || busy) return;
+    const name = displayTitle(doc);
+    const deletes = target.kind === "gist" || target.kind === "pages";
+    const what = target.kind === "gist" ? "gist" : "page";
+    const ok = await confirmUnpublish(
+      deletes
+        ? `Delete the ${what} for “${name}”? The link stops working for everyone.` +
+            (target.kind === "pages"
+              ? ` ${existing.open ? "A" : "An encrypted"} copy stays in the repo's git history.`
+              : "") +
+            (linked.length > 0
+              ? " Linked documents published with it stay published."
+              : "")
+        : `OpenMD can't delete “${name}” from ${target.label}; remove it there yourself. Forget the link here?`,
+      deletes ? "Delete" : "Forget",
+    );
+    if (!ok) return;
+    setRemovalShown(true);
+    setStatus({ kind: "busy", label: target.label, detail: "removing" });
+    try {
+      const result = await unpublish(doc, target);
+      setStatus({
+        kind: "removed",
+        label: target.label,
+        deleted: result === "deleted",
+      });
+    } catch (err) {
+      setStatus({
+        kind: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  const primary = () =>
+    status.kind === "done"
+      ? !waitingForPages && openAndClose(status.url)
+      : publish();
+  publishRef.current = primary;
+  openSavedRef.current = () => {
+    if (existing && !busy) openAndClose(existing.url);
+  };
+
+  // Keep the primary button focused so Enter presses it: once targets are in,
+  // and again after publishing (it was disabled meanwhile, which drops focus).
+  const ready = !!targets && !!target;
+  useEffect(() => {
+    if (ready) publishButton.current?.focus();
+  }, [ready, status.kind]);
+
+  const link = (href: string) => (event: React.MouseEvent) => {
+    event.preventDefault();
+    void openUrl(href);
+  };
+
+  // Switching public ↔ password on a published page makes a new page.
+  const accessChanged = pagesTarget && updatingPage && requirePassword === !!existing?.open;
+  const githubDoc = !!doc && isGithubDoc(doc);
+  const menuItems: { label: string; danger?: boolean; run: () => void }[] = [];
+  if (existing)
+    menuItems.push({ label: "Publish as a new copy", run: () => publish(true) });
+  if (!existing && canLink)
+    menuItems.push({ label: "Update an existing page instead…", run: () => setLinking(true) });
+  menuItems.push({
+    label: "Edit targets…",
+    run: () => useStore.getState().setTargetsEditorOpen(true),
+  });
+  if (existing)
+    menuItems.push({
+      label:
+        target?.kind === "gist" || target?.kind === "pages"
+          ? "Unpublish (delete it)…"
+          : "Forget this link…",
+      danger: true,
+      run: () => void takeDown(),
+    });
+
+  return (
+    <div className="settings-backdrop" onClick={() => !removing && close()}>
+      <div
+        className="remote-prompt publish-dialog"
+        onClick={(event) => {
+          event.stopPropagation();
+          setMenuOpen(false);
+        }}
+      >
+        <div className="publish-head">
+          <span className="remote-prompt-label">
+            Publish {doc ? `“${displayTitle(doc)}”` : ""}
+          </span>
+          {/* Who publishes: only before the first publish (an update stays with its account). */}
+          {(target?.kind === "gist" || pagesTarget) &&
+            !existing &&
+            accounts &&
+            accounts.logins.length > 0 && (
+              <Select
+                value={account}
+                disabled={busy}
+                title="GitHub account to publish as"
+                options={accounts.logins.map((login) => ({
+                  value: login,
+                  label: login === accounts.active ? `${login} (active)` : login,
+                }))}
+                onChange={(value) => {
+                  setAccount(value);
+                  localStorage.setItem(ACCOUNT_KEY, value);
+                }}
+              />
+            )}
+        </div>
+
+        {loadError ? (
+          <p className="rb-status rb-error">{loadError}</p>
+        ) : !targets ? (
+          <p className="rb-status">Loading targets…</p>
+        ) : (
+          targets.length > 1 && (
+            <div className="publish-targets" role="radiogroup">
+              {targets.map((t) => (
+                <label key={t.id} className={`publish-target${t.id === selected ? " selected" : ""}`}>
+                  <input
+                    type="radio"
+                    name="publish-target"
+                    checked={t.id === selected}
+                    disabled={busy}
+                    onChange={() => {
+                      // A new target starts fresh (so you can publish the same doc elsewhere).
+                      setSelected(t.id);
+                      setLinking(false);
+                      if (localStatus.kind !== "busy") {
+                        setStatus({ kind: "idle" });
+                        setRemovalShown(false);
+                      }
+                    }}
+                  />
+                  <span className="publish-target-label">{t.label}</span>
+                  {records[t.id] ? (
+                    <span className="publish-target-link">published</span>
+                  ) : (
+                    <span className="publish-target-new">new</span>
+                  )}
+                </label>
+              ))}
+            </div>
+          )
+        )}
+
+        {existing && (
+          <div className="publish-card">
+            <div className="publish-card-link">
+              <a href={existing.url} onClick={link(existing.url)} title={existing.url}>
+                {existing.url.replace(/^https?:\/\//, "")}
+              </a>
+              <CopyButton text={existing.url} tip="Copy link" />
+              <button
+                className="copy-btn"
+                onClick={() => openAndClose(existing.url)}
+                data-tip="Open in browser · ⌘↩"
+                aria-label="Open in browser"
+              >
+                <ExternalIcon size={13} />
+              </button>
+            </div>
+            <div className="publish-meta">
+              <span>Updated {timeAgo(existing.at)}</span>
+              {existing.account && <span>· {existing.account}</span>}
+              {pagesTarget && <span>· {existing.open ? "Public" : "🔒 Password"}</span>}
+              <span className="publish-meta-spacer" />
+              {target && doc && githubDoc && (
+                <button
+                  className={`publish-switch${existing.sync ? " on" : ""}`}
+                  role="switch"
+                  aria-checked={!!existing.sync}
+                  disabled={busy}
+                  data-tip="Republish when the file changes on GitHub (checked every few minutes while OpenMD is open)"
+                  onClick={() => setSync(doc, target.id, !existing.sync)}
+                >
+                  <i />
+                  Keep in sync
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {existing?.sync && syncError && (
+          <p className="publish-status rb-error">Couldn't sync with GitHub: {syncError}</p>
+        )}
+
+        {!existing && canLink && linking && status.kind !== "busy" && (
+          <div className="publish-link-existing">
+            <input
+              className="remote-prompt-input"
+              placeholder={`Paste the ${target!.label} link to update`}
+              value={linkDraft}
+              spellCheck={false}
+              autoFocus
+              onChange={(event) => {
+                setLinkDraft(event.target.value);
+                setLinkError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  linkPage();
+                }
+              }}
+            />
+            <button className="publish-edit" onClick={linkPage} disabled={!linkDraft.trim()}>
+              Link
+            </button>
+            {linkError && <p className="publish-status rb-error">{linkError}</p>}
+          </div>
+        )}
+
+        {pagesTarget && (
+          <div className="publish-rows">
+            {pagesTarget && (
+              <>
+                <span className="publish-key">Access</span>
+                <span className="publish-seg" role="radiogroup">
+                  <button
+                    role="radio"
+                    aria-checked={!requirePassword}
+                    className={requirePassword ? "" : "on"}
+                    disabled={busy}
+                    data-tip="Anyone with the link can read it, and so can anyone looking through your public repo md-viewer-pages"
+                    onClick={() => changeRequirePassword(false)}
+                  >
+                    Public
+                  </button>
+                  <button
+                    role="radio"
+                    aria-checked={requirePassword}
+                    className={requirePassword ? "on" : ""}
+                    disabled={busy}
+                    data-tip="Encrypted here; only readers with the password can open it"
+                    onClick={() => changeRequirePassword(true)}
+                  >
+                    Password
+                  </button>
+                </span>
+                {accessChanged && (
+                  <p className="publish-note">
+                    {requirePassword
+                      ? "Makes a new, password-protected page with a new link; the public one stays up until you unpublish it."
+                      : "Makes a new public page with a new link; the protected one stays up, still protected, until you unpublish it."}
+                  </p>
+                )}
+              </>
+            )}
+            {protectedPage && (
+              <>
+                <span className="publish-key">Password</span>
+                <span className="publish-pw">
+                  <span className="publish-pw-field">
+                    <input
+                      className="remote-prompt-input"
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      spellCheck={false}
+                      autoComplete="off"
+                      disabled={busy}
+                      onChange={(event) => setPassword(event.target.value)}
+                    />
+                    <button
+                      className="publish-eye"
+                      onClick={() => setShowPassword((v) => !v)}
+                      disabled={busy}
+                      data-tip={showPassword ? "Hide password" : "Show password"}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOffIcon size={15} /> : <EyeIcon size={15} />}
+                    </button>
+                  </span>
+                  <button
+                    className="rb-github-btn"
+                    onClick={() => {
+                      setPassword(generatePassword());
+                      setShowPassword(true);
+                    }}
+                    disabled={busy}
+                    data-tip="Make a new strong password"
+                  >
+                    New
+                  </button>
+                  <CopyButton text={password} tip="Copy password" />
+                </span>
+              </>
+            )}
+          </div>
+        )}
+        {needsSaveFirst && status.kind !== "done" && (
+          <p className="publish-status rb-error">
+            Save this document first (⌘S). A protected page is tied to its file,
+            so updates keep the same link and password; an unsaved document
+            would get a new page and a new password every time.
+          </p>
+        )}
+        {protectedPage && passwordTooShort && password && (
+          <p className="publish-status rb-error">
+            Use at least {MIN_PASSWORD} characters: the page is public, only the
+            password protects it.
+          </p>
+        )}
+        {protectedPage && pageId && savedPassword === null && !password && (
+          <p className="publish-status">
+            This page's password isn't saved on this Mac. Enter it, or set a new
+            one.
+          </p>
+        )}
+        {protectedPage && pageId && savedPassword && password !== savedPassword && (
+          <p className="publish-status">
+            Updating will change the password: send readers the new one.
+          </p>
+        )}
+        {pagesTarget && pagesRepo && !pagesRepo.exists && (
+          <p className="publish-status">
+            First time: this creates the public repo <b>{pagesRepo.repo}</b> for
+            your pages. Pages get random names
+            {requirePassword ? ", and nobody can read one without its password" : ""}.
+          </p>
+        )}
+
+        {(pagesTarget || (!existing && githubDoc) || linked.length > 0) && (
+          <div className="publish-checks">
+            {pagesTarget && (
+              <label className="publish-asnew">
+                <input
+                  type="checkbox"
+                  checked={listed}
+                  disabled={busy}
+                  onChange={(event) => {
+                    setListed(event.target.checked);
+                    listedTouched.current = true;
+                  }}
+                />
+                Show on my index page
+                <span
+                  className="publish-hint"
+                  data-tip={
+                    requirePassword
+                      ? "Its title shows on your index page, with a lock; the page itself still needs the password."
+                      : "Its title and link show on your index page."
+                  }
+                >
+                  ⓘ
+                </span>
+              </label>
+            )}
+            {!existing && githubDoc && (
+              <label className="publish-asnew">
+                <input
+                  type="checkbox"
+                  checked={syncNew}
+                  disabled={busy}
+                  onChange={(event) => setSyncNew(event.target.checked)}
+                />
+                Keep in sync with GitHub
+                <span
+                  className="publish-hint"
+                  data-tip="Republish when the file changes on GitHub (checked every few minutes while OpenMD is open)"
+                >
+                  ⓘ
+                </span>
+              </label>
+            )}
+            {linked.length > 0 && (
+              <label className="publish-asnew" title={linked.map((l) => l.doc.title).join("\n")}>
+                <input
+                  type="checkbox"
+                  checked={withLinked}
+                  disabled={busy}
+                  onChange={(event) => {
+                    setWithLinked(event.target.checked);
+                    localStorage.setItem(LINKED_KEY, event.target.checked ? "1" : "0");
+                  }}
+                />
+                Include {linked.length} linked document{linked.length === 1 ? "" : "s"}
+              </label>
+            )}
+          </div>
+        )}
+
+        {status.kind === "busy" && (
+          <p className="publish-status">
+            {status.title ? `Publishing “${status.title}” to` : "Publishing to"} {status.label}…
+            {status.detail ? ` ${status.detail}` : ""}
+          </p>
+        )}
+        {status.kind === "removed" && (
+          <p className="publish-status publish-done">
+            {status.deleted
+              ? `Deleted from ${status.label}. The link no longer works.`
+              : `Forgot the link to ${status.label}.`}
+          </p>
+        )}
+        {status.kind === "error" && (
+          <p className="publish-status rb-error">{status.message}</p>
+        )}
+        {status.kind === "done" && (
+          <p className="publish-status publish-done">
+            {status.updated ? "Updated on" : "Published to"} {status.label}
+            {status.linked > 0 ? `, with ${status.linked} linked document${status.linked === 1 ? "" : "s"}` : ""}
+            . Link copied.
+          </p>
+        )}
+        {status.kind === "done" && live === "waiting" && (
+          <p className="publish-status publish-waiting">
+            Getting it ready on GitHub Pages, usually under a minute. The link
+            is copied and will work as soon as this says it's live; you can
+            close this meanwhile.
+          </p>
+        )}
+        {status.kind === "done" && live === "live" && (
+          <p className="publish-status publish-done">
+            {status.locked
+              ? "Live now. Send the password separately from the link (copy it above)."
+              : "Live now."}
+          </p>
+        )}
+        {status.kind === "done" && status.indexUrl && (
+          <div className="publish-current">
+            <span className="publish-when">Your index:</span>
+            <a href={status.indexUrl} onClick={link(status.indexUrl)} title={status.indexUrl}>
+              {status.indexUrl.replace(/^https?:\/\//, "")}
+            </a>
+            <CopyButton text={status.indexUrl} tip="Copy index link" />
+          </div>
+        )}
+        {status.kind === "done" && status.indexError && (
+          <p className="publish-status rb-error">
+            Published, but your index page couldn't be updated: {status.indexError}
+          </p>
+        )}
+        {status.kind === "done" && live === "slow" && (
+          <p className="publish-status">
+            GitHub Pages is taking longer than usual. The link will work once
+            its build finishes; you can close this.
+          </p>
+        )}
+        {status.kind === "done" && status.skipped.length > 0 && (
+          <p className="publish-status rb-error">
+            Couldn't publish (links to these stay as they were):{"\n"}
+            {status.skipped.join("\n")}
+          </p>
+        )}
+
+        <div className="remote-prompt-actions">
+          <span className="publish-more-wrap">
+            <button
+              className={`publish-more${menuOpen ? " open" : ""}`}
+              disabled={busy}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={(event) => {
+                event.stopPropagation();
+                setMenuOpen((v) => !v);
+              }}
+            >
+              ⋯ More
+            </button>
+            {menuOpen && (
+              <div className="publish-menu" role="menu">
+                {menuItems.map((item) => (
+                  <button
+                    key={item.label}
+                    role="menuitem"
+                    className={item.danger ? "danger" : undefined}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      item.run();
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </span>
+          <button
+            className="remote-prompt-cancel"
+            onClick={close}
+            disabled={removing}
+            data-tip={busy ? "Keeps publishing; progress shows in the corner" : undefined}
+          >
+            {status.kind === "done" || busy ? "Close" : "Cancel"}
+          </button>
+          <button
+            ref={publishButton}
+            className="remote-prompt-open"
+            onClick={primary}
+            disabled={
+              !target ||
+              busy ||
+              waitingForPages ||
+              (status.kind !== "done" && (passwordTooShort || needsSaveFirst))
+            }
+            data-tip={
+              status.kind === "done"
+                ? "Open in browser · ↩"
+                : existing
+                  ? "⌘↩ opens the published page"
+                  : undefined
+            }
+          >
+            {busy
+              ? "Publishing…"
+              : waitingForPages
+                ? "Getting ready…"
+                : status.kind === "done"
+                  ? "Open ↗"
+                  : existing && !accessChanged
+                    ? "Update"
+                    : protectedPage && pagesRepo && !pagesRepo.exists
+                      ? "Create & publish"
+                      : "Publish"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

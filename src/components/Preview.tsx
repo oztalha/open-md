@@ -1,0 +1,309 @@
+import { loadRemoteImages } from "../remoteImages";
+import { onPreviewCopy } from "../copy";
+import { renderMermaid } from "../mermaid";
+import { useCallback } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { renderBlocks, subscribeRerender } from "../markdown";
+import { renderCsvBlocks } from "../csv";
+import { classifyPath, isCsvPath, isJsonPath, isJsonlPath, isSvgPath } from "../types";
+import type { Doc } from "../types";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { renderJsonBlocks, renderJsonlBlocks } from "../json";
+import { codeLanguage, renderCodeBlocks } from "../code";
+import { useStore } from "../store";
+import { applyAnnotations, keyForDoc, subscribeAnnotations } from "../annotations";
+
+interface BlockRecord {
+  html: string;
+  nodes: ChildNode[];
+}
+
+/**
+ * Patch the container so its children match `htmls`, touching only the blocks
+ * that changed (diffed by common prefix/suffix). Returns the new records.
+ * Every string in `htmls` is already DOMPurify-sanitized by renderBlocks.
+ */
+function patchBlocks(
+  container: HTMLElement,
+  oldRecords: BlockRecord[],
+  htmls: string[],
+): BlockRecord[] {
+  const minLength = Math.min(oldRecords.length, htmls.length);
+
+  let prefix = 0;
+  while (prefix < minLength && oldRecords[prefix].html === htmls[prefix]) prefix++;
+
+  let suffix = 0;
+  while (
+    suffix < minLength - prefix &&
+    oldRecords[oldRecords.length - 1 - suffix].html === htmls[htmls.length - 1 - suffix]
+  ) {
+    suffix++;
+  }
+
+  if (prefix === htmls.length && oldRecords.length === htmls.length) {
+    return oldRecords; // nothing changed
+  }
+
+  // Remove the stale middle.
+  for (let i = prefix; i < oldRecords.length - suffix; i++) {
+    for (const node of oldRecords[i].nodes) node.remove();
+  }
+
+  // Insert the new middle before the first surviving suffix node.
+  let refNode: ChildNode | null = null;
+  for (let i = oldRecords.length - suffix; i < oldRecords.length; i++) {
+    if (oldRecords[i].nodes.length) {
+      refNode = oldRecords[i].nodes[0];
+      break;
+    }
+  }
+
+  const template = document.createElement("template");
+  const middle: BlockRecord[] = [];
+  for (let i = prefix; i < htmls.length - suffix; i++) {
+    template.innerHTML = htmls[i]; // sanitized upstream
+    const nodes = Array.from(template.content.childNodes);
+    container.insertBefore(template.content, refNode);
+    middle.push({ html: htmls[i], nodes });
+  }
+
+  return [
+    ...oldRecords.slice(0, prefix),
+    ...middle,
+    ...oldRecords.slice(oldRecords.length - suffix),
+  ];
+}
+
+/**
+ * Imperative preview controller: subscribes to the store and patches the DOM
+ * incrementally, outside of React's render cycle. Returns its cleanup.
+ */
+/**
+ * Tables wider than the text column get `table-wide`, which lets them use the
+ * whole pane width (centred) instead of being squeezed into the column and
+ * scrolling. Tables that fit stay aligned with the text.
+ */
+function markWideTables(container: HTMLElement): void {
+  const style = getComputedStyle(container);
+  const column =
+    container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  for (const table of container.querySelectorAll<HTMLTableElement>("table")) {
+    table.classList.remove("table-wide"); // measure at its natural width
+    if (table.scrollWidth > column + 1) table.classList.add("table-wide");
+  }
+}
+
+/** Blob URL of the SVG last shown, revoked when the text changes. */
+const svgUrls = new Map<string, string>();
+
+/**
+ * An image document shown on its own: a raster file by its path (local via the
+ * asset protocol; remote paths are fetched by loadRemoteImages), an SVG from
+ * its text, so edits in the editor redraw it live.
+ */
+function imageBlocks(doc: Doc, source: string): string[] {
+  let src: string;
+  if (doc.image) {
+    src = doc.path ? convertFileSrc(doc.path) : (doc.remote?.path ?? "");
+  } else {
+    const old = svgUrls.get(doc.id);
+    if (old) URL.revokeObjectURL(old);
+    src = URL.createObjectURL(new Blob([source], { type: "image/svg+xml" }));
+    svgUrls.set(doc.id, src);
+  }
+  const alt = doc.title.replace(/"/g, "&quot;");
+  return [`<div class="image-view"><img src="${src.replace(/"/g, "%22")}" alt="${alt}"></div>`];
+}
+
+function createPreviewController(container: HTMLElement, docId: string): () => void {
+  // React reuses the same <article> node across StrictMode remounts and docId
+  // swaps, calling this ref callback again. Reset to a known-empty state so the
+  // fresh `records=[]` matches the DOM — otherwise patchBlocks finds no old
+  // records to remove and appends a second full copy of the document.
+  container.replaceChildren();
+
+  let records: BlockRecord[] = [];
+  let rendered: string | null = null;
+  let renderedBase: string | null = null;
+  let cost = 0;
+  let frame: number | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const content = () => useStore.getState().docs[docId]?.content;
+  // Path used for CSV detection / titles (local or remote); base dir for
+  // resolving relative images only applies to local files.
+  const docPath = () => {
+    const doc = useStore.getState().docs[docId];
+    return doc ? classifyPath(doc) : null;
+  };
+  const localDir = () => {
+    const local = useStore.getState().docs[docId]?.path;
+    return local ? local.slice(0, local.lastIndexOf("/")) : null;
+  };
+  const visible = () => {
+    // The preview only renders for the active doc; hidden only in editor-only mode.
+    const mode = useStore.getState().views[docId]?.mode;
+    return mode !== "editor";
+  };
+
+  const cancel = () => {
+    if (frame !== null) cancelAnimationFrame(frame);
+    if (timer !== null) clearTimeout(timer);
+    frame = null;
+    timer = null;
+  };
+
+  const annotationKey = () => keyForDoc(useStore.getState().docs[docId]);
+
+  const apply = () => {
+    const source = content();
+    const path = docPath();
+    if (source === undefined || (rendered === source && renderedBase === path)) return;
+    const start = performance.now();
+    const doc = useStore.getState().docs[docId];
+    const blocks = doc?.image || isSvgPath(path)
+      ? imageBlocks(doc!, source)
+      : isCsvPath(path)
+      ? renderCsvBlocks(source, path)
+      : isJsonPath(path)
+        ? renderJsonBlocks(source)
+        : isJsonlPath(path)
+          ? renderJsonlBlocks(source)
+          : codeLanguage(path)
+            ? renderCodeBlocks(source, codeLanguage(path)!)
+            : renderBlocks(source, localDir());
+    records = patchBlocks(container, records, blocks);
+    markWideTables(container);
+    void renderMermaid(container);
+    const remote = useStore.getState().docs[docId]?.remote;
+    if (remote) loadRemoteImages(container, remote);
+    applyAnnotations(container, annotationKey());
+    rendered = source;
+    renderedBase = path;
+    cost = performance.now() - start;
+  };
+
+  const schedule = () => {
+    const source = content();
+    if (source === undefined || (rendered === source && renderedBase === docPath()) || !visible())
+      return;
+    cancel();
+    // Adaptive: cheap documents update on the next frame (instant while
+    // typing); expensive ones back off proportionally to their render cost.
+    if (cost < 25) {
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        apply();
+      });
+    } else {
+      timer = setTimeout(
+        () => {
+          timer = null;
+          apply();
+        },
+        Math.min(400, cost * 3),
+      );
+    }
+  };
+
+  // Initial fill is synchronous so the pane never flashes empty.
+  if (visible()) apply();
+
+  const unsubscribe = useStore.subscribe(schedule);
+  // Re-apply annotations when they change, without a full re-render.
+  const unsubAnnotations = subscribeAnnotations(() => {
+    if (rendered !== null) applyAnnotations(container, annotationKey());
+  });
+  // The shiki highlighter loads async; when it finishes (or lazy-loads a new
+  // language), invalidate the cached render so this pane re-highlights.
+  const unsubRerender = subscribeRerender(() => {
+    rendered = null;
+    schedule();
+  });
+  // Re-check wide tables when the pane's width changes (window, sidebar, split
+  // ratio). Deferred to the next frame and skipped when only the height moved:
+  // toggling the class inside the observer callback re-triggers layout, which
+  // the browser reports as "ResizeObserver loop completed with undelivered
+  // notifications".
+  let lastWidth = -1;
+  let resizeFrame = 0;
+  const resize = new ResizeObserver((entries) => {
+    const width = Math.round(entries[0]?.contentRect.width ?? 0);
+    if (width === lastWidth) return;
+    lastWidth = width;
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(() => markWideTables(container));
+  });
+  resize.observe(container);
+  return () => {
+    resize.disconnect();
+    cancelAnimationFrame(resizeFrame);
+    cancel();
+    unsubscribe();
+    unsubAnnotations();
+    unsubRerender();
+  };
+}
+
+export function Preview({ docId, empty }: { docId: string; empty: boolean }) {
+  // JSONL records are separate blocks, so the view hides per-block line numbers.
+  const jsonl = useStore((s) => {
+    const doc = s.docs[docId];
+    return !!doc && isJsonlPath(classifyPath(doc));
+  });
+  const attach = useCallback(
+    (container: HTMLElement | null) => {
+      if (!container) return;
+      return createPreviewController(container, docId);
+    },
+    [docId],
+  );
+
+  const handleClick = (event: React.MouseEvent) => {
+    const target = event.target as HTMLElement;
+
+    // Images open in the lightbox.
+    const image = target.closest("img");
+    if (image) {
+      event.preventDefault();
+      useStore.getState().setLightbox(image.currentSrc || image.getAttribute("src") || "");
+      return;
+    }
+
+    const anchor = target.closest("a");
+    if (!anchor) return;
+    event.preventDefault();
+    const href = anchor.getAttribute("href") ?? "";
+    if (!href) return;
+    if (href.startsWith("#")) {
+      // In-document links (footnotes, anchors) scroll within the preview.
+      const container = event.currentTarget as HTMLElement;
+      container
+        .querySelector(`[id="${CSS.escape(href.slice(1))}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else if (/^https?:\/\//i.test(href)) {
+      void openUrl(href);
+    } else if (/^mdviewer:\/\//i.test(href)) {
+      void useStore.getState().openPaths([href]);
+    } else if (!/^[a-z][a-z0-9+.-]*:/i.test(href)) {
+      // A link to another file (relative or absolute) — open it if present.
+      void useStore.getState().followLink(docId, href);
+    }
+  };
+
+  return (
+    // Focusable (not via Tab) so it can take focus from a collapsed editor.
+    <div className="preview" tabIndex={-1}>
+      <article
+        ref={attach}
+        className="preview-content"
+        data-doc-id={docId}
+        data-jsonl={jsonl || undefined}
+        onClick={handleClick}
+        onCopy={(e) => onPreviewCopy(e.nativeEvent)}
+      />
+      {empty && <div className="preview-empty">Nothing to preview</div>}
+    </div>
+  );
+}

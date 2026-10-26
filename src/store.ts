@@ -1,0 +1,846 @@
+import { Transaction } from "@codemirror/state";
+import { create } from "zustand";
+import type { Doc, LeafNode, TabView, ViewMode } from "./types";
+import type { PublishJob } from "./publishJob";
+import { basename, displayTitle, isCodePath, isDataPath, isDirty, isImagePath, isPristine } from "./types";
+import {
+  askToSave,
+  confirmReloadDiscard,
+  copyToClipboard,
+  githubResolveUrl,
+  pathExists,
+  allowAsset,
+  pickFilesToOpen,
+  pickSavePath,
+  readRemoteFile,
+  readTextFile,
+  showError,
+  reportMissingFile,
+  writeRemoteFile,
+  writeTextFile,
+} from "./ipc";
+import { allEditorViews, getEditorView } from "./editor/registry";
+import { useSettings } from "./settings";
+import { isGithubUrl, isValidHost, parseOpenSpec, remoteUrl, splitLineSuffix } from "./remote";
+import { addRecent, getRecents, removeRecent } from "./recent";
+import { revealLine } from "./reveal";
+import { formatMarkdown } from "./format";
+import { buildExportHtml } from "./export";
+import { resolveLink } from "./docLinks";
+import type { RemoteRef } from "./types";
+
+/** Where the next Open Remote browser starts, when set (a GitHub folder link). */
+let remoteBrowserStart: RemoteRef | null = null;
+
+export function browseRemoteAt(host: string, dir: string): void {
+  remoteBrowserStart = { host, path: dir };
+  useStore.getState().setRemoteBrowser("open");
+}
+
+export function remoteBrowserStartAt(): RemoteRef | null {
+  return remoteBrowserStart;
+}
+
+function makeDoc(partial: Partial<Doc> = {}): Doc {
+  return {
+    id: crypto.randomUUID(),
+    path: null,
+    remote: null,
+    title: "Untitled",
+    content: "",
+    saved: "",
+    ...partial,
+  };
+}
+
+/** A document's default view state when it first opens as a tab. */
+function makeView(mode: ViewMode): TabView {
+  return { mode, ratio: 0.5, outline: false };
+}
+
+const SIDEBAR_KEY = "sidebarOpen";
+const SIDEBAR_TAB_KEY = "sidebarTab";
+const SIDEBAR_WIDTH_KEY = "sidebarWidth";
+const SIDEBAR_MIN = 160;
+const SIDEBAR_MAX = 520;
+const SIDEBAR_DEFAULT = 240;
+
+function clampSidebar(width: number): number {
+  return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(width)));
+}
+
+interface AppState {
+  docs: Record<string, Doc>;
+  /** Ordered doc ids — the tab order. */
+  tabs: string[];
+  /** The active (visible) doc id. */
+  activeId: string;
+  /** Per-doc view state (mode / split ratio / outline). */
+  views: Record<string, TabView>;
+  /** Whether the left sidebar is expanded. */
+  sidebarOpen: boolean;
+  /** Which sidebar tab is showing: open/recent files, or the document outline. */
+  sidebarTab: "files" | "outline";
+  /** Left sidebar width in px (draggable). */
+  sidebarWidth: number;
+  /** True while files are being dragged over the window. */
+  dropping: boolean;
+  /** Content scale factor (⌘+ / ⌘−). */
+  zoom: number;
+  /** Image currently shown in the lightbox, if any. */
+  lightboxSrc: string | null;
+  /** Remote file browser: which flow it's showing, or null when closed. */
+  remoteBrowser: "open" | "save" | null;
+  /** Files dropped while the remote browser is open, waiting to be uploaded. */
+  remoteDrop: string[] | null;
+  /** Whether the About window is showing. */
+  aboutOpen: boolean;
+  /** Whether the Publish dialog is showing. */
+  publishOpen: boolean;
+  /** Whether the Published Documents window is showing. */
+  publishedOpen: boolean;
+  /** Bumped after each publish so views re-read saved links. */
+  publishTick: number;
+  /** Failed GitHub syncs, by `publishErrorKey(doc key, target id)`. */
+  publishErrors: Record<string, string>;
+  /** The publish in progress (or just finished); runs on with the dialog closed. */
+  publishJob: PublishJob | null;
+  /** Whether the publish targets editor is showing. */
+  targetsEditorOpen: boolean;
+  /** Preview find bar (⌘F outside the editor). */
+  findOpen: boolean;
+  /** Bumped by ⌘F while the bar is open, to refocus its field. */
+  findFocusTick: number;
+  /** Where ⌘F searches: the editor, or the rendered preview. */
+  findTarget: "editor" | "preview";
+  setFindOpen(open: boolean, target?: "editor" | "preview"): void;
+  /** Docs whose file changed on disk while they had unsaved edits. */
+  changedOnDisk: Record<string, true>;
+  /** Mark (or clear) a doc as changed on disk. */
+  setChangedOnDisk(docId: string, changed: boolean): void;
+  /** Replace a doc's text with the file's new contents (keeps caret + scroll). */
+  applyExternal(docId: string, content: string): void;
+
+  // --- selectors -----------------------------------------------------------
+  /** The single visible leaf, synthesized from activeId + its view state. */
+  activeLeaf(): LeafNode;
+  focusedLeaf(): LeafNode | null;
+  focusedDoc(): Doc | null;
+  dirtyDocs(): Doc[];
+
+  // --- pure UI updates -----------------------------------------------------
+  setDropping(value: boolean): void;
+  setZoom(value: number): void;
+  setLightbox(src: string | null): void;
+  setRemoteBrowser(mode: "open" | "save" | null): void;
+  setAboutOpen(open: boolean): void;
+  setRemoteDrop(paths: string[] | null): void;
+  setPublishOpen(open: boolean): void;
+  setPublishedOpen(open: boolean): void;
+  bumpPublished(): void;
+  setPublishError(key: string, message: string | null): void;
+  setPublishJob(job: PublishJob | null): void;
+  setTargetsEditorOpen(open: boolean): void;
+  setContent(docId: string, content: string): void;
+  toggleSidebar(): void;
+  setSidebarTab(tab: "files" | "outline"): void;
+  showSidebarTab(tab: "files" | "outline"): void;
+  setSidebarWidth(width: number): void;
+  selectTab(docId: string): void;
+  /** Move a tab to a new index in the strip (drag-to-reorder). */
+  reorderTab(docId: string, toIndex: number): void;
+  /** Alias for selectTab (leaf id === doc id now). */
+  focusLeaf(docId: string): void;
+  nextTab(): void;
+  prevTab(): void;
+  jumpToTab(index: number): void;
+  setMode(docId: string, mode: ViewMode): void;
+  togglePreview(): void;
+  toggleOutline(): void;
+  setRatio(docId: string, ratio: number): void;
+  newDoc(): void;
+
+  // --- file operations -----------------------------------------------------
+  placeDoc(doc: Doc, mode: ViewMode): void;
+  openPaths(specs: string[]): Promise<void>;
+  openRemote(host: string, path: string, line?: number): Promise<void>;
+  openViaDialog(): Promise<void>;
+  followLink(docId: string, href: string): Promise<void>;
+  exportHtml(docId: string): Promise<void>;
+  saveDoc(docId: string, saveAs?: boolean): Promise<boolean>;
+  reloadDoc(docId: string): Promise<void>;
+  copyDocPath(docId: string): Promise<void>;
+  /** Write the doc to host:path over SSH and make it a remote document. */
+  saveToRemote(docId: string, host: string, path: string): Promise<boolean>;
+  closeTab(docId?: string): Promise<void>;
+}
+
+/**
+ * Files currently being read for opening, keyed like recents (path or
+ * mdviewer:// URL). A slow read (e.g. SSH lag) must not let repeated clicks
+ * open the same file in several tabs.
+ */
+const opening = new Set<string>();
+
+const initialDoc = makeDoc();
+
+const MIN_ZOOM = 0.7;
+const MAX_ZOOM = 1.8;
+
+function clampZoom(value: number): number {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(value * 10) / 10));
+}
+
+function applyZoom(zoom: number): void {
+  document.documentElement.style.setProperty("--content-scale", String(zoom));
+}
+
+const initialZoom = clampZoom(Number(localStorage.getItem("zoom")) || 1);
+applyZoom(initialZoom);
+
+/** Read errors meaning "the file isn't there" (local `os error 2`, or ssh `cat`). */
+function isNotFound(msg: string): boolean {
+  return /No such file or directory|os error 2/i.test(msg);
+}
+
+/** Tell the user a file is gone; offer to drop it from Recents if it's there. */
+async function missingFile(spec: string, where: string): Promise<void> {
+  const inRecents = getRecents().some((r) => r.spec === spec);
+  if (await reportMissingFile(where, inRecents)) removeRecent(spec);
+}
+
+export const useStore = create<AppState>()((set, get) => ({
+  docs: { [initialDoc.id]: initialDoc },
+  tabs: [initialDoc.id],
+  activeId: initialDoc.id,
+  views: { [initialDoc.id]: makeView("editor") },
+  sidebarOpen: localStorage.getItem(SIDEBAR_KEY) !== "false",
+  sidebarTab: localStorage.getItem(SIDEBAR_TAB_KEY) === "outline" ? "outline" : "files",
+  sidebarWidth: clampSidebar(Number(localStorage.getItem(SIDEBAR_WIDTH_KEY)) || SIDEBAR_DEFAULT),
+  dropping: false,
+  zoom: initialZoom,
+  lightboxSrc: null,
+  remoteBrowser: null,
+  aboutOpen: false,
+  remoteDrop: null,
+  publishOpen: false,
+  publishedOpen: false,
+  publishTick: 0,
+  publishErrors: {},
+  publishJob: null,
+  targetsEditorOpen: false,
+  changedOnDisk: {},
+  findOpen: false,
+  findFocusTick: 0,
+  findTarget: "preview",
+
+  setFindOpen(open, target) {
+    if (target && target !== get().findTarget) set({ findTarget: target });
+    if (open && get().findOpen) set({ findFocusTick: get().findFocusTick + 1 });
+    else if (get().findOpen !== open) set({ findOpen: open });
+  },
+
+  setChangedOnDisk(docId, changed) {
+    const cur = get().changedOnDisk;
+    if (!!cur[docId] === changed) return;
+    const next = { ...cur };
+    if (changed) next[docId] = true;
+    else delete next[docId];
+    set({ changedOnDisk: next });
+  },
+
+  applyExternal(docId, content) {
+    set((s) => {
+      const current = s.docs[docId];
+      return current ? { docs: { ...s.docs, [docId]: { ...current, content, saved: content } } } : s;
+    });
+    get().setChangedOnDisk(docId, false);
+    const view = getEditorView(docId);
+    if (!view) return;
+    // Replace only the span that differs, so the caret, selection and scroll
+    // position survive (a whole-document replace would reset them).
+    const old = view.state.doc.toString();
+    if (old === content) return;
+    let start = 0;
+    const max = Math.min(old.length, content.length);
+    while (start < max && old.charCodeAt(start) === content.charCodeAt(start)) start++;
+    let endOld = old.length;
+    let endNew = content.length;
+    while (endOld > start && endNew > start && old.charCodeAt(endOld - 1) === content.charCodeAt(endNew - 1)) {
+      endOld--;
+      endNew--;
+    }
+    view.dispatch({
+      changes: { from: start, to: endOld, insert: content.slice(start, endNew) },
+      annotations: Transaction.addToHistory.of(false),
+    });
+  },
+
+  activeLeaf() {
+    const { activeId, views } = get();
+    const v = views[activeId] ?? makeView(useSettings.getState().settings.defaultMode);
+    return { type: "leaf", id: activeId, docId: activeId, mode: v.mode, ratio: v.ratio, outline: v.outline };
+  },
+
+  focusedLeaf() {
+    return get().activeLeaf();
+  },
+
+  focusedDoc() {
+    return get().docs[get().activeId] ?? null;
+  },
+
+  dirtyDocs() {
+    return Object.values(get().docs).filter(isDirty);
+  },
+
+  setDropping(value) {
+    if (get().dropping !== value) set({ dropping: value });
+  },
+
+  setZoom(value) {
+    const zoom = clampZoom(value);
+    if (zoom === get().zoom) return;
+    set({ zoom });
+    localStorage.setItem("zoom", String(zoom));
+    applyZoom(zoom);
+    for (const view of allEditorViews()) view.requestMeasure();
+  },
+
+  setLightbox(src) {
+    if (get().lightboxSrc !== src) set({ lightboxSrc: src });
+  },
+
+  bumpPublished() {
+    set((s) => ({ publishTick: s.publishTick + 1 }));
+  },
+
+  setPublishError(key, message) {
+    const errors = get().publishErrors;
+    if ((errors[key] ?? null) === message) return;
+    const next = { ...errors };
+    if (message === null) delete next[key];
+    else next[key] = message;
+    set({ publishErrors: next });
+  },
+
+  setPublishJob(job) {
+    set({ publishJob: job });
+  },
+
+  setTargetsEditorOpen(open) {
+    if (get().targetsEditorOpen !== open) set({ targetsEditorOpen: open });
+  },
+
+  setPublishOpen(open) {
+    if (get().publishOpen !== open) set({ publishOpen: open });
+  },
+
+  setPublishedOpen(open) {
+    if (get().publishedOpen !== open) set({ publishedOpen: open });
+  },
+
+  setRemoteDrop(paths) {
+    set({ remoteDrop: paths });
+  },
+
+  setAboutOpen(open) {
+    if (get().aboutOpen !== open) set({ aboutOpen: open });
+  },
+
+  setRemoteBrowser(mode) {
+    if (!mode) remoteBrowserStart = null;
+    if (get().remoteBrowser !== mode) set({ remoteBrowser: mode });
+  },
+
+  setContent(docId, content) {
+    const doc = get().docs[docId];
+    if (!doc || doc.content === content) return;
+    set((s) => ({ docs: { ...s.docs, [docId]: { ...doc, content } } }));
+  },
+
+  toggleSidebar() {
+    const next = !get().sidebarOpen;
+    localStorage.setItem(SIDEBAR_KEY, String(next));
+    set({ sidebarOpen: next });
+  },
+
+  setSidebarWidth(width) {
+    const w = clampSidebar(width);
+    if (w === get().sidebarWidth) return;
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(w));
+    set({ sidebarWidth: w });
+  },
+
+  selectTab(docId) {
+    if (get().tabs.includes(docId) && get().activeId !== docId) set({ activeId: docId });
+  },
+
+  reorderTab(docId, toIndex) {
+    const { tabs } = get();
+    const from = tabs.indexOf(docId);
+    if (from === -1) return;
+    const clamped = Math.max(0, Math.min(tabs.length - 1, toIndex));
+    if (from === clamped) return;
+    const next = tabs.filter((t) => t !== docId);
+    next.splice(clamped, 0, docId);
+    set({ tabs: next });
+  },
+
+  focusLeaf(docId) {
+    get().selectTab(docId);
+  },
+
+  nextTab() {
+    const { tabs, activeId } = get();
+    if (tabs.length < 2) return;
+    const idx = tabs.indexOf(activeId);
+    set({ activeId: tabs[(idx + 1) % tabs.length] });
+  },
+
+  prevTab() {
+    const { tabs, activeId } = get();
+    if (tabs.length < 2) return;
+    const idx = tabs.indexOf(activeId);
+    set({ activeId: tabs[(idx - 1 + tabs.length) % tabs.length] });
+  },
+
+  jumpToTab(index) {
+    const id = get().tabs[index];
+    if (id && get().activeId !== id) set({ activeId: id });
+  },
+
+  setMode(docId, mode) {
+    const view = get().views[docId];
+    if (!view) return;
+    set((s) => ({ views: { ...s.views, [docId]: { ...view, mode } } }));
+  },
+
+  togglePreview() {
+    const id = get().activeId;
+    const view = get().views[id];
+    if (!view) return;
+    // Flip between editor and preview (a split view collapses to preview first).
+    const mode = view.mode === "preview" ? "editor" : "preview";
+    set((s) => ({ views: { ...s.views, [id]: { ...view, mode } } }));
+  },
+
+  // Each sidebar tab has its own key: it shows that tab (opening the sidebar),
+  // or hides the sidebar if that tab is already showing.
+  showSidebarTab(tab) {
+    const s = get();
+    if (s.sidebarOpen && s.sidebarTab === tab) s.toggleSidebar();
+    else s.setSidebarTab(tab);
+  },
+
+  toggleOutline() {
+    get().showSidebarTab("outline");
+  },
+
+  setSidebarTab(tab) {
+    localStorage.setItem(SIDEBAR_TAB_KEY, tab);
+    if (!get().sidebarOpen) localStorage.setItem(SIDEBAR_KEY, "true");
+    set({ sidebarTab: tab, sidebarOpen: true });
+  },
+
+  setRatio(docId, ratio) {
+    const view = get().views[docId];
+    if (!view) return;
+    set((s) => ({ views: { ...s.views, [docId]: { ...view, ratio } } }));
+  },
+
+  newDoc() {
+    const s = get();
+    // The active tab is already an empty scratch document — nothing to do.
+    const active = s.docs[s.activeId];
+    if (active && isPristine(active)) return;
+    const doc = makeDoc();
+    set({
+      docs: { ...s.docs, [doc.id]: doc },
+      views: { ...s.views, [doc.id]: makeView("editor") },
+      tabs: [...s.tabs, doc.id],
+      activeId: doc.id,
+    });
+  },
+
+  placeDoc(doc, mode) {
+    const s = get();
+    const active = s.docs[s.activeId];
+
+    // Opening a real file while the active tab is a pristine scratch replaces it
+    // in place (no leftover empty "Untitled" tab).
+    if (active && isPristine(active)) {
+      const oldId = s.activeId;
+      const docs = { ...s.docs, [doc.id]: doc };
+      delete docs[oldId];
+      const views = { ...s.views, [doc.id]: makeView(mode) };
+      delete views[oldId];
+      set({
+        docs,
+        views,
+        tabs: s.tabs.map((id) => (id === oldId ? doc.id : id)),
+        activeId: doc.id,
+      });
+      return;
+    }
+
+    set({
+      docs: { ...s.docs, [doc.id]: doc },
+      views: { ...s.views, [doc.id]: makeView(mode) },
+      tabs: [...s.tabs, doc.id],
+      activeId: doc.id,
+    });
+  },
+
+  async openPaths(specs) {
+    const defaultHost = useSettings.getState().settings.defaultRemoteHost ?? "";
+    for (const spec of specs) {
+      // A github.com link: a file opens as a read-only GitHub document, a
+      // folder opens in the remote browser.
+      if (isGithubUrl(spec)) {
+        try {
+          const { host, path, isDir } = await githubResolveUrl(spec);
+          if (isDir) browseRemoteAt(host, path);
+          else await get().openRemote(host, path);
+        } catch (err) {
+          await showError(String(err));
+        }
+        continue;
+      }
+      const parsed = parseOpenSpec(spec, defaultHost);
+      if (parsed.kind === "remote") {
+        await get().openRemote(parsed.ref.host, parsed.ref.path, parsed.line);
+        continue;
+      }
+      const path = parsed.path;
+      const findOpen = () => Object.values(get().docs).find((d) => d.path === path);
+
+      // Already open (or on its way)? Activate it instead of opening a second copy.
+      const existingDoc = findOpen();
+      if (existingDoc) {
+        get().selectTab(existingDoc.id);
+        if (parsed.line) revealLine(existingDoc.id, parsed.line, isCodePath(path));
+        continue;
+      }
+      if (opening.has(path)) continue;
+      opening.add(path);
+
+      let content: string;
+      try {
+        if (isImagePath(path)) {
+          if (!(await pathExists(path))) throw new Error(`No such file or directory (os error 2)`);
+          await allowAsset(path);
+          content = "";
+        } else content = await readTextFile(path);
+      } catch (err) {
+        const msg = String(err);
+        if (isNotFound(msg)) {
+          await missingFile(path, path);
+          continue;
+        }
+        await showError(
+          /UTF-8/i.test(msg)
+            ? `“${basename(path)}” isn't a text file, so it can't be opened here.\n\nTo copy it to a remote machine, open the remote browser (⇧⌘O), go to a folder, and drop the file onto it.`
+            : msg,
+        );
+        continue;
+      } finally {
+        opening.delete(path);
+      }
+      const opened = findOpen();
+      if (opened) {
+        get().selectTab(opened.id);
+        continue;
+      }
+
+      const doc = makeDoc({ path, title: basename(path), content, saved: content, image: isImagePath(path) || undefined });
+      // Data files open straight into the table view; markdown follows the preference.
+      const openMode = isDataPath(path) ? "preview" : useSettings.getState().settings.defaultMode;
+      get().placeDoc(doc, openMode);
+      if (parsed.line) revealLine(doc.id, parsed.line, isCodePath(path));
+      addRecent(path, basename(path));
+    }
+  },
+
+  async openRemote(host, path, line) {
+    if (!isValidHost(host)) {
+      await showError(`Invalid SSH host: ${host}`);
+      return;
+    }
+    const findOpen = () =>
+      Object.values(get().docs).find((d) => d.remote && d.remote.host === host && d.remote.path === path);
+    // Already open? Activate the existing tab.
+    const existing = findOpen();
+    if (existing) {
+      get().selectTab(existing.id);
+      if (line) revealLine(existing.id, line, isCodePath(path));
+      return;
+    }
+    const remote: RemoteRef = { host, path };
+    const key = remoteUrl(remote);
+    if (opening.has(key)) return; // already on its way (e.g. a repeated click)
+    opening.add(key);
+
+    let content: string;
+    try {
+      // Raster images are fetched by the preview, not read as text.
+      content = isImagePath(path) ? "" : await readRemoteFile(host, path);
+    } catch (err) {
+      if (isNotFound(String(err))) await missingFile(key, `${host}:${path}`);
+      else await showError(String(err));
+      return;
+    } finally {
+      opening.delete(key);
+    }
+    // It may have been opened another way while we were reading.
+    const opened = findOpen();
+    if (opened) {
+      get().selectTab(opened.id);
+      return;
+    }
+
+    const doc = makeDoc({ remote, title: basename(path), content, saved: content, image: isImagePath(path) || undefined });
+    const openMode = isDataPath(path) ? "preview" : useSettings.getState().settings.defaultMode;
+    get().placeDoc(doc, openMode);
+    if (line) revealLine(doc.id, line, isCodePath(path));
+    addRecent(remoteUrl(remote), `${basename(path)} — ${host}`);
+  },
+
+  async openViaDialog() {
+    const paths = await pickFilesToOpen();
+    if (paths.length) await get().openPaths(paths);
+  },
+
+  async exportHtml(docId) {
+    const doc = get().docs[docId];
+    if (!doc) return;
+    const view = getEditorView(docId);
+    const source = view ? view.state.doc.toString() : doc.content;
+    const title = displayTitle(doc);
+    const base = (doc.path ?? doc.remote?.path)?.replace(/\.[^./]+$/, "") ?? title;
+    const suggested = `${base.split("/").pop() || "document"}.html`;
+    const path = await pickSavePath(suggested);
+    if (!path) return;
+    try {
+      await writeTextFile(path, await buildExportHtml(source, title));
+    } catch (err) {
+      await showError(String(err));
+    }
+  },
+
+  async followLink(docId, href) {
+    const doc = get().docs[docId];
+    if (!doc) return;
+    // A line to jump to: GitHub-style "#L33" or a "path:33" suffix.
+    const fragmentLine = Number(/#L?(\d+)$/.exec(href)?.[1]) || undefined;
+
+    if (doc.remote) {
+      const baseDir = doc.remote.path.slice(0, doc.remote.path.lastIndexOf("/"));
+      const target = resolveLink(baseDir, href);
+      if (!target) return;
+      const { path, line } = splitLineSuffix(target);
+      await get().openRemote(doc.remote.host, path, line ?? fragmentLine);
+      return;
+    }
+
+    const baseDir = doc.path ? doc.path.slice(0, doc.path.lastIndexOf("/")) : null;
+    const target = resolveLink(baseDir, href);
+    if (!target) return;
+    const { path, line } = splitLineSuffix(target);
+    const jump = line ?? fragmentLine;
+    if (await pathExists(path)) {
+      await get().openPaths([jump ? `${path}:${jump}` : path]);
+    } else {
+      await showError(`File not found: ${path}`);
+    }
+  },
+
+
+  async saveDoc(docId, saveAs = false) {
+    const doc = get().docs[docId];
+    if (!doc) return false;
+    if (doc.image) return true; // nothing to write: images are view-only
+
+    // Editor → store syncing is coalesced; the live view is the source of
+    // truth, so saves always take the freshest text.
+    const liveView = getEditorView(docId);
+    const liveContent = liveView ? liveView.state.doc.toString() : doc.content;
+    if (liveContent !== doc.content) {
+      set((s) => ({ docs: { ...s.docs, [docId]: { ...s.docs[docId], content: liveContent } } }));
+    }
+
+    let content = liveContent;
+
+    // Optionally reformat markdown (never data files) before writing.
+    const classify = doc.path ?? doc.remote?.path ?? null;
+    if (useSettings.getState().settings.formatOnSave && !isDataPath(classify)) {
+      const formatted = await formatMarkdown(content);
+      if (formatted !== null && formatted !== content) {
+        content = formatted;
+        const view = getEditorView(docId);
+        if (view) {
+          view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content } });
+        }
+      }
+    }
+
+    // Plain Save of a remote document writes straight back over SSH.
+    if (doc.remote && !saveAs) {
+      try {
+        await writeRemoteFile(doc.remote.host, doc.remote.path, content);
+      } catch (err) {
+        await showError(String(err));
+        return false;
+      }
+      set((s) => {
+        const current = s.docs[docId];
+        return current ? { docs: { ...s.docs, [docId]: { ...current, saved: content } } } : s;
+      });
+      // Saving over a changed file is the user's answer to the banner.
+      get().setChangedOnDisk(docId, false);
+      addRecent(remoteUrl(doc.remote), `${basename(doc.remote.path)} — ${doc.remote.host}`);
+      return true;
+    }
+
+    let path = doc.path;
+    if (saveAs || !path) {
+      const base =
+        doc.path || doc.remote
+          ? doc.title.replace(/\.(md|markdown|txt|csv|tsv)$/i, "")
+          : displayTitle(doc).replace(/[/\\:]/g, "-");
+      const suggested = doc.path ?? `${base}.md`;
+      path = await pickSavePath(suggested);
+      if (!path) return false;
+    }
+
+    try {
+      await writeTextFile(path, content);
+    } catch (err) {
+      await showError(String(err));
+      return false;
+    }
+
+    // Saving to disk makes the document local (a remote "Save As" detaches it).
+    set((s) => {
+      const current = s.docs[docId];
+      if (!current) return s;
+      return {
+        docs: {
+          ...s.docs,
+          [docId]: { ...current, path, remote: null, title: basename(path), saved: content },
+        },
+      };
+    });
+    get().setChangedOnDisk(docId, false);
+    addRecent(path, basename(path));
+    return true;
+  },
+
+  async reloadDoc(docId) {
+    const doc = get().docs[docId];
+    if (!doc) return;
+    // Nothing to reload for an unsaved scratch document.
+    if (!doc.path && !doc.remote) return;
+
+    // The live editor view is the source of truth for dirtiness.
+    const liveView = getEditorView(docId);
+    const liveContent = liveView ? liveView.state.doc.toString() : doc.content;
+    if (liveContent !== doc.saved && !(await confirmReloadDiscard(displayTitle(doc)))) return;
+
+    let content: string;
+    try {
+      content = doc.remote
+        ? await readRemoteFile(doc.remote.host, doc.remote.path)
+        : await readTextFile(doc.path!);
+    } catch (err) {
+      await showError(String(err));
+      return;
+    }
+
+    get().applyExternal(docId, content);
+  },
+
+  async copyDocPath(docId) {
+    const doc = get().docs[docId];
+    if (!doc) return;
+    if (doc.remote) {
+      // Default: bare path (pastes straight into a shell on that box). Opt-in to
+      // the `host:path` form via settings.
+      const withHost = useSettings.getState().settings.copyPathWithHost;
+      await copyToClipboard(withHost ? `${doc.remote.host}:${doc.remote.path}` : doc.remote.path);
+      return;
+    }
+    if (doc.path) await copyToClipboard(doc.path);
+  },
+
+  async saveToRemote(docId, host, path) {
+    const doc = get().docs[docId];
+    if (!doc) return false;
+    if (!isValidHost(host)) {
+      await showError(`Invalid SSH host: ${host}`);
+      return false;
+    }
+    // The live editor view is the source of truth (store sync is coalesced).
+    const view = getEditorView(docId);
+    const content = view ? view.state.doc.toString() : doc.content;
+    try {
+      await writeRemoteFile(host, path, content);
+    } catch (err) {
+      await showError(String(err));
+      return false;
+    }
+    // The document now lives on the remote: later ⌘S writes straight back there.
+    const remote: RemoteRef = { host, path };
+    set((s) => {
+      const current = s.docs[docId];
+      if (!current) return s;
+      return {
+        docs: {
+          ...s.docs,
+          [docId]: { ...current, path: null, remote, title: basename(path), content, saved: content },
+        },
+      };
+    });
+    addRecent(remoteUrl(remote), `${basename(path)} — ${host}`);
+    return true;
+  },
+
+  async closeTab(docId) {
+    const id = docId ?? get().activeId;
+    if (!get().tabs.includes(id)) return;
+
+    const doc = get().docs[id];
+    if (doc && isDirty(doc)) {
+      const wantsSave = await askToSave(doc.title);
+      if (wantsSave) {
+        const saved = await get().saveDoc(id);
+        if (!saved) return; // cancelled the save dialog — abort the close
+      }
+    }
+
+    const s = get();
+    const idx = s.tabs.indexOf(id);
+    if (idx === -1) return;
+
+    // Last tab: keep the window alive with a fresh scratch document.
+    if (s.tabs.length === 1) {
+      const fresh = makeDoc();
+      set({
+        docs: { [fresh.id]: fresh },
+        views: { [fresh.id]: makeView("editor") },
+        tabs: [fresh.id],
+        activeId: fresh.id,
+      });
+      return;
+    }
+
+    const tabs = s.tabs.filter((t) => t !== id);
+    const docs = { ...s.docs };
+    delete docs[id];
+    const views = { ...s.views };
+    delete views[id];
+    // If the closed tab was active, hand over to the next (else previous) tab.
+    const activeId = s.activeId === id ? (s.tabs[idx + 1] ?? s.tabs[idx - 1]) : s.activeId;
+    set({ docs, views, tabs, activeId });
+  },
+}));

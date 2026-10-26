@@ -1,0 +1,921 @@
+//! Publishing: send the current document to a "publish target" defined in
+//! `~/.config/open-md/publish.json`.
+//!
+//! Targets come in three kinds:
+//! - `mcp`: a sequence of tool calls on a local MCP server (stdio). The app
+//!   only speaks the open MCP protocol, so service-specific details (which
+//!   server, which tools, which arguments) live in the user's config file.
+//! - `gist`: built in, via the user's logged-in `gh` CLI.
+//! - `command`: a shell command that prints the published URL.
+//!
+//! Security: the webview never supplies commands. It names a target id; the
+//! backend resolves the server/command from the config file itself, and MCP
+//! tool calls are limited to the tools that target's steps list.
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
+const INIT_TIMEOUT: Duration = Duration::from_secs(30);
+const CALL_TIMEOUT: Duration = Duration::from_secs(120);
+const PROTOCOL_VERSION: &str = "2025-06-18";
+
+// --- config ------------------------------------------------------------------
+
+#[derive(Deserialize, Serialize, Clone, Default)]
+struct ServerCfg {
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: HashMap<String, String>,
+}
+
+/// One step of an MCP target: a tool call, or a shell `command` (e.g. a
+/// follow-up the server has no tool for). The webview only learns that a step
+/// is a command (`run`), never the command itself.
+#[derive(Deserialize, Serialize, Clone)]
+pub struct Step {
+    #[serde(default)]
+    tool: String,
+    #[serde(default, skip_serializing)]
+    command: Option<String>,
+    #[serde(default, skip_deserializing)]
+    run: bool,
+    #[serde(default)]
+    args: Value,
+    #[serde(default)]
+    save: HashMap<String, String>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct Target {
+    id: String,
+    label: String,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default, skip_serializing)]
+    server: Option<String>,
+    #[serde(default, skip_serializing)]
+    command: Option<String>,
+    #[serde(default)]
+    create: Vec<Step>,
+    #[serde(default)]
+    update: Vec<Step>,
+    #[serde(default, rename = "urlTemplate", skip_serializing_if = "Option::is_none")]
+    url_template: Option<String>,
+    #[serde(default)]
+    public: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    format: Option<String>,
+    /// Uploads one local image and prints its link, so published copies show
+    /// the document's images (`MDV_ID`, `MDV_IMAGE`, `MDV_IMAGE_NAME`).
+    #[serde(default, skip_serializing)]
+    images: Option<ImagesCfg>,
+    /// Told to the webview instead of the command itself.
+    #[serde(default, skip_deserializing, rename = "uploadsImages")]
+    uploads_images: bool,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct ImagesCfg {
+    command: String,
+}
+
+impl Target {
+    fn kind(&self) -> &str {
+        match self.kind.as_deref() {
+            Some(k) => k,
+            None if self.command.is_some() => "command",
+            None => "mcp",
+        }
+    }
+}
+
+#[derive(Deserialize, Default)]
+struct Config {
+    /// Extra folders to search for commands, before the defaults.
+    #[serde(default)]
+    path: Vec<String>,
+    #[serde(default)]
+    servers: HashMap<String, ServerCfg>,
+    #[serde(default)]
+    targets: Vec<Target>,
+}
+
+fn config_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_default();
+    PathBuf::from(home).join(".config/open-md/publish.json")
+}
+
+fn builtin(id: &str, label: &str, kind: &str) -> Target {
+    Target {
+        id: id.into(),
+        label: label.into(),
+        kind: Some(kind.into()),
+        server: None,
+        command: None,
+        create: vec![],
+        update: vec![],
+        url_template: None,
+        public: false,
+        format: None,
+        images: None,
+        uploads_images: false,
+    }
+}
+
+/// Used when there's no config file yet: the built-in targets.
+fn default_targets() -> Vec<Target> {
+    vec![builtin("gist", "GitHub Gist", "gist"), protected_page()]
+}
+
+/// GitHub Pages (pages.rs: public or password-protected) needs no setup, so
+/// it's always offered, even with a config file that predates it. The id is
+/// from when every page had a password; records refer to it.
+fn protected_page() -> Target {
+    builtin("protected-page", "GitHub Pages", "pages")
+}
+
+/// Configs saved before pages could go without a password still carry the
+/// old built-in label; a label the user picked stays.
+fn relabel_legacy(t: &mut Target) {
+    if t.id == "protected-page" && t.label == "Password-protected page" {
+        t.label = protected_page().label;
+    }
+}
+
+fn load_config() -> Result<Config, String> {
+    let path = config_path();
+    match std::fs::read_to_string(&path) {
+        Ok(text) => {
+            let mut config = serde_json::from_str::<Config>(&text)
+                .map_err(|e| format!("{} is not valid: {e}", path.display()))?;
+            // Resolve the kind once so the frontend gets it explicitly.
+            for t in &mut config.targets {
+                t.kind = Some(t.kind().to_string());
+                relabel_legacy(t);
+                for s in t.create.iter_mut().chain(t.update.iter_mut()) {
+                    s.run = s.command.is_some();
+                }
+                t.uploads_images = t.images.is_some();
+            }
+            if !config.targets.iter().any(|t| t.kind() == "pages" || t.id == "protected-page") {
+                config.targets.push(protected_page());
+            }
+            Ok(config)
+        }
+        Err(_) => Ok(Config { path: vec![], servers: HashMap::new(), targets: default_targets() }),
+    }
+}
+
+fn find_target(config: &Config, id: &str) -> Result<Target, String> {
+    config
+        .targets
+        .iter()
+        .find(|t| t.id == id)
+        .cloned()
+        .ok_or_else(|| format!("No publish target named {id:?} in {}", config_path().display()))
+}
+
+const STARTER_CONFIG: &str = r#"{
+  "_readme": "Publish targets for OpenMD. Format: https://github.com/oztalha/open-md/blob/main/docs/PUBLISHING.md",
+  "servers": {},
+  "targets": [
+    { "id": "gist", "label": "GitHub Gist", "kind": "gist", "public": false }
+  ]
+}
+"#;
+
+/// The targets (without commands) for the Publish dialog.
+#[tauri::command]
+pub fn publish_targets() -> Result<Vec<Target>, String> {
+    Ok(load_config()?.targets)
+}
+
+/// Make sure the config file exists (writing a starter one if not) and open it
+/// in the default text editor.
+#[tauri::command]
+pub fn publish_edit_config() -> Result<String, String> {
+    let path = config_path();
+    if !path.exists() {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&path, STARTER_CONFIG).map_err(|e| e.to_string())?;
+    }
+    Command::new("open")
+        .arg("-t")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("Could not open {}: {e}", path.display()))?;
+    Ok(path.display().to_string())
+}
+
+/// The config file's text for the in-app editor (the starter config if there's
+/// none yet). Unlike `publish_targets`, this includes commands: the editor
+/// shows them, and saving new ones needs the user's native confirmation.
+#[tauri::command]
+pub fn publish_config_read() -> Result<String, String> {
+    match std::fs::read_to_string(config_path()) {
+        Ok(text) => Ok(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(STARTER_CONFIG.to_string()),
+        Err(e) => Err(format!("Could not read {}: {e}", config_path().display())),
+    }
+}
+
+/// Everything in a config that runs a program, one readable line each.
+fn executables(config: &Config) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    for (name, server) in &config.servers {
+        let mut env: Vec<_> = server.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        env.sort();
+        let env = if env.is_empty() { String::new() } else { format!("  (env: {})", env.join(" ")) };
+        out.insert(format!("MCP server \"{name}\": {} {}{env}", server.command, server.args.join(" ")).trim_end().to_string());
+    }
+    for target in &config.targets {
+        if let Some(command) = &target.command {
+            out.insert(format!("Target \"{}\": {command}", target.id));
+        }
+        for step in target.create.iter().chain(target.update.iter()) {
+            if let Some(command) = &step.command {
+                out.insert(format!("Target \"{}\" step: {command}", target.id));
+            }
+        }
+        if let Some(images) = &target.images {
+            out.insert(format!("Target \"{}\" images: {}", target.id, images.command));
+        }
+    }
+    out
+}
+
+/// Commands in `new` that `old` doesn't already have, exactly.
+fn new_executables(old: &Config, new: &Config) -> Vec<String> {
+    let known = executables(old);
+    executables(new).into_iter().filter(|e| !known.contains(e)).collect()
+}
+
+/// Save the config from the in-app editor. Adding or changing anything that
+/// runs a program needs a yes in a native dialog, which the webview can't
+/// show or answer itself, so documents still can't smuggle in commands.
+#[tauri::command]
+pub async fn publish_config_write(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let new: Config = serde_json::from_str(&text).map_err(|e| format!("Not valid: {e}"))?;
+    let path = config_path();
+    let old = match std::fs::read_to_string(&path) {
+        Ok(old) => serde_json::from_str::<Config>(&old).unwrap_or_default(),
+        Err(_) => Config::default(),
+    };
+    let added = new_executables(&old, &new);
+    if !added.is_empty() {
+        let message = format!(
+            "These will run on your Mac when you publish:\n\n{}\n\nOnly allow commands you trust.",
+            added.join("\n")
+        );
+        let allowed = tauri::async_runtime::spawn_blocking(move || {
+            app.dialog()
+                .message(message)
+                .title("Allow new publish commands?")
+                .kind(MessageDialogKind::Warning)
+                .buttons(MessageDialogButtons::OkCancelCustom("Allow".into(), "Cancel".into()))
+                .blocking_show()
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        if !allowed {
+            return Err("Not saved: the new commands weren't allowed.".into());
+        }
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, text).map_err(|e| format!("Could not write {}: {e}", path.display()))
+}
+
+/// Write the content to publish into a temp file whose name some services use
+/// as the title / content type (e.g. `Notes.md`).
+#[tauri::command]
+pub fn publish_write_temp(name: String, contents: String) -> Result<String, String> {
+    let safe: String = name
+        .chars()
+        .map(|c| if c == '/' || c == '\\' || c == ':' || c.is_control() { '-' } else { c })
+        .collect();
+    let dir = std::env::temp_dir().join("md-viewer-publish");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(if safe.trim().is_empty() { "document.md".to_string() } else { safe });
+    std::fs::write(&path, contents).map_err(|e| e.to_string())?;
+    Ok(path.display().to_string())
+}
+
+// --- environment -------------------------------------------------------------
+
+/// PATH for finding tools. Apps launched from Finder get a minimal PATH, which
+/// misses Homebrew and tools installed under your home directory.
+///
+/// Uses a *non-interactive* login shell (profile files, not ~/.zshrc): an
+/// interactive startup runs commands, and zsh looks each one up along PATH, so
+/// a PATH entry under e.g. ~/Downloads makes macOS prompt for Downloads access
+/// on the app's behalf. Common per-user tool dirs are added explicitly instead.
+fn login_path() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| {
+        let home = std::env::var("HOME").unwrap_or_default();
+        // "path" from publish.json first, then common per-user tool dirs.
+        let configured = load_config().map(|c| c.path).unwrap_or_default();
+        let extras: Vec<String> = configured
+            .iter()
+            .map(|d| expand_home(d))
+            .chain([".local/bin", ".cargo/bin", ".bun/bin"].iter().map(|d| format!("{home}/{d}")))
+            .filter(|d| std::path::Path::new(d).is_dir())
+            .collect();
+        let fallback = format!(
+            "{}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            extras.join(":")
+        );
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        let out = Command::new(shell)
+            .args(["-lc", "printf '__MDV__%s__MDV__' \"$PATH\""])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output();
+        let found = out.ok().and_then(|o| {
+            let s = String::from_utf8_lossy(&o.stdout).to_string();
+            let start = s.find("__MDV__")? + 7;
+            let end = s[start..].find("__MDV__")? + start;
+            Some(s[start..end].to_string())
+        });
+        let path = match found {
+            Some(p) if !p.is_empty() => format!("{p}:{fallback}"),
+            _ => fallback,
+        };
+        path.split(':').filter(|d| !is_protected_dir(d)).collect::<Vec<_>>().join(":")
+    })
+}
+
+/// Folders macOS guards with a privacy prompt (TCC). Merely checking whether a
+/// command exists in one of them (e.g. a PATH entry under ~/Downloads) makes
+/// macOS ask the user to grant the app access, so they're left out of PATH.
+fn is_protected_dir(dir: &str) -> bool {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let dir = expand_home(dir);
+    ["Downloads", "Desktop", "Documents", "Library/Mobile Documents"]
+        .iter()
+        .any(|p| {
+            let root = format!("{home}/{p}");
+            dir == root || dir.starts_with(&format!("{root}/"))
+        })
+}
+
+fn expand_home(s: &str) -> String {
+    match s.strip_prefix("~/") {
+        Some(rest) => format!("{}/{rest}", std::env::var("HOME").unwrap_or_default()),
+        None => s.to_string(),
+    }
+}
+
+/// Resolve a bare command name against the login PATH.
+fn resolve_command(cmd: &str) -> String {
+    let cmd = expand_home(cmd);
+    if cmd.contains('/') {
+        return cmd;
+    }
+    for dir in login_path().split(':') {
+        let candidate = PathBuf::from(expand_home(dir)).join(&cmd);
+        if candidate.is_file() {
+            return candidate.display().to_string();
+        }
+    }
+    cmd
+}
+
+pub(crate) fn base_command(cmd: &str) -> Command {
+    let mut c = Command::new(resolve_command(cmd));
+    c.env("PATH", login_path());
+    c
+}
+
+// --- MCP client --------------------------------------------------------------
+
+struct Session {
+    child: Child,
+    stdin: ChildStdin,
+    rx: Receiver<Value>,
+    stderr: Arc<Mutex<VecDeque<String>>>,
+    next_id: u64,
+    allowed: HashSet<String>,
+    label: String,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Session {
+    fn send(&mut self, msg: &Value) -> Result<(), String> {
+        let line = serde_json::to_string(msg).map_err(|e| e.to_string())?;
+        writeln!(self.stdin, "{line}")
+            .and_then(|_| self.stdin.flush())
+            .map_err(|e| self.failure(&format!("could not write to the server: {e}")))
+    }
+
+    fn failure(&self, what: &str) -> String {
+        let tail: Vec<String> = self.stderr.lock().map(|q| q.iter().cloned().collect()).unwrap_or_default();
+        if tail.is_empty() {
+            format!("{}: {what}", self.label)
+        } else {
+            format!("{}: {what}\n{}", self.label, tail.join("\n"))
+        }
+    }
+
+    /// Send a request and wait for its response, answering any requests the
+    /// server makes of us in the meantime (we support none, so we decline).
+    fn request(&mut self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.send(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))?;
+        let deadline = Instant::now() + timeout;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let msg = match self.rx.recv_timeout(left) {
+                Ok(m) => m,
+                Err(RecvTimeoutError::Timeout) => {
+                    return Err(self.failure(&format!("timed out waiting for {method}")))
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(self.failure("the server exited unexpectedly"))
+                }
+            };
+            if msg.get("method").is_some() {
+                if let Some(req_id) = msg.get("id") {
+                    let reply = json!({ "jsonrpc": "2.0", "id": req_id,
+                        "error": { "code": -32601, "message": "Not supported by OpenMD" } });
+                    self.send(&reply)?;
+                }
+                continue; // notifications (logging, progress) are ignored
+            }
+            if msg.get("id").and_then(Value::as_u64) != Some(id) {
+                continue;
+            }
+            if let Some(err) = msg.get("error") {
+                let text = err.get("message").and_then(Value::as_str).unwrap_or("unknown error");
+                return Err(self.failure(text));
+            }
+            return Ok(msg.get("result").cloned().unwrap_or(Value::Null));
+        }
+    }
+}
+
+fn start_session(label: &str, server: &ServerCfg, allowed: HashSet<String>) -> Result<Session, String> {
+    let mut child = base_command(&server.command)
+        .args(&server.args)
+        .envs(&server.env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("{label}: could not start {:?}: {e}", server.command))?;
+
+    let stdin = child.stdin.take().ok_or("no stdin")?;
+    let stdout = child.stdout.take().ok_or("no stdout")?;
+    let stderr_pipe = child.stderr.take().ok_or("no stderr")?;
+
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Ok(v) = serde_json::from_str::<Value>(line.trim()) {
+                if tx.send(v).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    // Keep the last few stderr lines for error messages (e.g. auth failures).
+    let stderr = Arc::new(Mutex::new(VecDeque::new()));
+    let sink = stderr.clone();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr_pipe).lines().map_while(Result::ok) {
+            if let Ok(mut q) = sink.lock() {
+                q.push_back(line);
+                if q.len() > 8 {
+                    q.pop_front();
+                }
+            }
+        }
+    });
+
+    let mut session = Session { child, stdin, rx, stderr, next_id: 1, allowed, label: label.to_string() };
+    session.request(
+        "initialize",
+        json!({ "protocolVersion": PROTOCOL_VERSION, "capabilities": {},
+                "clientInfo": { "name": "OpenMD", "version": env!("CARGO_PKG_VERSION") } }),
+        INIT_TIMEOUT,
+    )?;
+    session.send(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }))?;
+    Ok(session)
+}
+
+#[derive(Default)]
+pub struct Sessions {
+    next: u64,
+    open: HashMap<u64, Session>,
+}
+
+pub type SessionState = Mutex<Sessions>;
+
+/// Start the MCP server for a target; returns a session handle.
+#[tauri::command]
+pub async fn publish_mcp_open(
+    state: tauri::State<'_, SessionState>,
+    target_id: String,
+) -> Result<u64, String> {
+    let config = load_config()?;
+    let target = find_target(&config, &target_id)?;
+    let server_name = target.server.clone().ok_or_else(|| format!("{} has no \"server\"", target.label))?;
+    let server = config
+        .servers
+        .get(&server_name)
+        .cloned()
+        .ok_or_else(|| format!("{}: no server named {server_name:?} under \"servers\"", target.label))?;
+    let allowed = target
+        .create
+        .iter()
+        .chain(&target.update)
+        .filter(|s| s.command.is_none())
+        .map(|s| s.tool.clone())
+        .collect();
+    let label = target.label.clone();
+    let session = tauri::async_runtime::spawn_blocking(move || start_session(&label, &server, allowed))
+        .await
+        .map_err(|e| e.to_string())??;
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.next += 1;
+    let id = s.next;
+    s.open.insert(id, session);
+    Ok(id)
+}
+
+/// Call one tool in an open session. Returns the MCP `result` object.
+#[tauri::command]
+pub async fn publish_mcp_call(
+    state: tauri::State<'_, SessionState>,
+    session: u64,
+    tool: String,
+    args: Value,
+) -> Result<Value, String> {
+    let mut sess = {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        s.open.remove(&session).ok_or("Publish session is closed")?
+    };
+    if !sess.allowed.contains(&tool) {
+        return Err(format!("{}: tool {tool:?} isn't part of this target", sess.label));
+    }
+    let (sess, result) = tauri::async_runtime::spawn_blocking(move || {
+        let r = sess.request("tools/call", json!({ "name": tool, "arguments": args }), CALL_TIMEOUT);
+        (sess, r)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    state.lock().map_err(|e| e.to_string())?.open.insert(session, sess);
+    result
+}
+
+#[tauri::command]
+pub fn publish_mcp_close(state: tauri::State<'_, SessionState>, session: u64) {
+    if let Ok(mut s) = state.lock() {
+        s.open.remove(&session); // Drop kills the server
+    }
+}
+
+// --- gist and command targets ------------------------------------------------
+
+#[derive(Serialize)]
+pub struct Published {
+    id: String,
+    url: String,
+}
+
+fn first_url(text: &str) -> Option<String> {
+    text.split_whitespace()
+        .find(|w| w.starts_with("https://") || w.starts_with("http://"))
+        .map(|w| w.trim_end_matches(|c: char| ",.;)\"'".contains(c)).to_string())
+}
+
+fn run(mut cmd: Command, what: &str) -> Result<String, String> {
+    let out = cmd.stdin(Stdio::null()).output().map_err(|e| format!("Could not run {what}: {e}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("{what} failed:\n{}", err.trim()));
+    }
+    Ok(stdout)
+}
+
+/// A chosen account's token; `None` means gh's active account.
+pub(crate) fn account_token(account: &Option<String>) -> Result<Option<String>, String> {
+    match account {
+        Some(login) => crate::github::account_token(login)
+            .map(Some)
+            .ok_or_else(|| format!("gh has no login for {login}; run `gh auth login`")),
+        None => Ok(None),
+    }
+}
+
+pub(crate) fn gh_as(token: &Option<String>) -> Command {
+    let mut cmd = base_command("gh");
+    if let Some(token) = token {
+        cmd.env("GH_TOKEN", token);
+    }
+    cmd
+}
+
+/// Whether a gist still exists (it may have been deleted on github.com).
+/// Only a definite "not found" is `false`; other failures are errors, so a
+/// network hiccup never makes the app forget a published link.
+#[tauri::command]
+pub async fn gist_exists(id: String, account: Option<String>) -> Result<bool, String> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(format!("Invalid gist id: {id:?}"));
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let token = account_token(&account)?;
+        let out = gh_as(&token)
+            .args(["api", &format!("gists/{id}"), "--jq", ".id"])
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| format!("Could not run gh: {e}"))?;
+        if out.status.success() {
+            return Ok(true);
+        }
+        let err = String::from_utf8_lossy(&out.stderr);
+        if err.contains("HTTP 404") {
+            return Ok(false);
+        }
+        Err(err.trim().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Delete a gist (Unpublish). Already gone counts as done.
+#[tauri::command]
+pub async fn gist_delete(id: String, account: Option<String>) -> Result<(), String> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(format!("Invalid gist id: {id:?}"));
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let token = account_token(&account)?;
+        let out = gh_as(&token)
+            .args(["api", "-X", "DELETE", &format!("gists/{id}")])
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| format!("Could not run gh: {e}"))?;
+        let err = String::from_utf8_lossy(&out.stderr);
+        if out.status.success() || err.contains("HTTP 404") {
+            Ok(())
+        } else {
+            Err(err.trim().to_string())
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Create or update a gist with the file (uses the `gh` CLI's login).
+#[tauri::command]
+pub async fn publish_gist(
+    target_id: String,
+    file: String,
+    title: String,
+    existing: Option<String>,
+    account: Option<String>,
+) -> Result<Published, String> {
+    let target = find_target(&load_config()?, &target_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let name = PathBuf::from(&file).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let token = account_token(&account)?;
+        let gh = || gh_as(&token);
+        if let Some(id) = existing {
+            let mut cmd = gh();
+            cmd.args(["gist", "edit", &id, "--filename", &name, &file]);
+            run(cmd, "gh gist edit")?;
+            return Ok(Published { url: format!("https://gist.github.com/{id}"), id });
+        }
+        let mut cmd = gh();
+        cmd.args(["gist", "create", "--desc", &title]);
+        if target.public {
+            cmd.arg("--public");
+        }
+        cmd.arg(&file);
+        let out = run(cmd, "gh gist create")?;
+        let url = first_url(&out).ok_or("gh gist create didn't print a link")?;
+        let id = url.rsplit('/').next().unwrap_or_default().to_string();
+        Ok(Published { id, url })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Run a `command` target: `sh -c <command>` with MDV_FILE / MDV_TITLE /
+/// MDV_ID in the environment (never interpolated into the command string).
+#[tauri::command]
+pub async fn publish_command(
+    target_id: String,
+    file: String,
+    title: String,
+    existing: Option<String>,
+) -> Result<Published, String> {
+    let target = find_target(&load_config()?, &target_id)?;
+    let command = target.command.clone().ok_or_else(|| format!("{} has no \"command\"", target.label))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = base_command("/bin/sh");
+        cmd.args(["-c", &command])
+            .env("MDV_FILE", &file)
+            .env("MDV_TITLE", &title)
+            .env("MDV_ID", existing.unwrap_or_default());
+        let out = run(cmd, &target.label)?;
+        let url = first_url(&out).ok_or_else(|| format!("{} didn't print a link", target.label))?;
+        Ok(Published { id: url.clone(), url })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Env vars for a command step: each publish variable as `MDV_<NAME>`, except
+/// `content` (the document is in `MDV_FILE`; env vars have size limits).
+fn step_env(vars: &HashMap<String, String>) -> Vec<(String, String)> {
+    vars.iter()
+        .filter(|(k, _)| k.as_str() != "content" && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+        .map(|(k, v)| (format!("MDV_{}", k.to_ascii_uppercase()), v.clone()))
+        .collect()
+}
+
+/// Run a `command` step of an MCP target, looked up in the config by position
+/// (the webview never supplies the command). Returns stdout as JSON if it is
+/// JSON, else `{"text": ...}`, so `save` works as for tool replies.
+#[tauri::command]
+pub async fn publish_step_command(
+    target_id: String,
+    update: bool,
+    index: usize,
+    vars: HashMap<String, String>,
+) -> Result<Value, String> {
+    let target = find_target(&load_config()?, &target_id)?;
+    let steps = if update { &target.update } else { &target.create };
+    let command = steps
+        .get(index)
+        .and_then(|s| s.command.clone())
+        .ok_or_else(|| format!("{}: step {} has no \"command\"", target.label, index + 1))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = base_command("/bin/sh");
+        cmd.args(["-c", &command]).envs(step_env(&vars));
+        let out = run(cmd, &target.label)?;
+        Ok(serde_json::from_str(out.trim()).unwrap_or_else(|_| json!({ "text": out })))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Write bytes (base64, e.g. an image read over ssh) to a temp file for an
+/// upload command; returns its path.
+#[tauri::command]
+pub fn publish_write_temp_bytes(name: String, data: String) -> Result<String, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?;
+    let safe: String = name
+        .chars()
+        .map(|c| if c == '/' || c == '\\' || c == ':' || c.is_control() { '-' } else { c })
+        .collect();
+    let dir = std::env::temp_dir().join("md-viewer-publish").join("images");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(if safe.trim().is_empty() { "image".to_string() } else { safe });
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(path.display().to_string())
+}
+
+/// Upload one image with a target's `images` command (looked up in the config,
+/// never sent by the webview). Returns the link it printed (JSON `url`, or the
+/// first link in its output).
+#[tauri::command]
+pub async fn publish_upload_image(
+    target_id: String,
+    id: String,
+    image: String,
+    name: String,
+) -> Result<String, String> {
+    let target = find_target(&load_config()?, &target_id)?;
+    let command = target
+        .images
+        .clone()
+        .ok_or_else(|| format!("{} has no \"images\" command", target.label))?
+        .command;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = base_command("/bin/sh");
+        cmd.args(["-c", &command])
+            .env("MDV_ID", &id)
+            .env("MDV_IMAGE", &image)
+            .env("MDV_IMAGE_NAME", &name);
+        let out = run(cmd, &format!("{} (image {name})", target.label))?;
+        let from_json = serde_json::from_str::<Value>(out.trim())
+            .ok()
+            .and_then(|v| v.get("url").and_then(Value::as_str).map(str::to_string));
+        from_json
+            .or_else(|| first_url(&out))
+            .ok_or_else(|| format!("{}: uploading {name} printed no link", target.label))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn new_commands_need_confirmation() {
+        let parse = |s: &str| serde_json::from_str::<super::Config>(s).unwrap();
+        let old = parse(r#"{"servers":{"n":{"command":"notes-mcp"}},"targets":[{"id":"a","label":"A","command":"up \"$MDV_FILE\""}]}"#);
+        // Relabeling, reordering or adding a gist runs nothing new.
+        let same = parse(r#"{"targets":[{"id":"g","label":"G","kind":"gist"},{"id":"a","label":"Renamed","command":"up \"$MDV_FILE\""}],"servers":{"n":{"command":"notes-mcp"}}}"#);
+        assert!(super::new_executables(&old, &same).is_empty());
+        // A changed command, new args/env, or a new step command all count.
+        let changed = parse(r#"{"servers":{"n":{"command":"notes-mcp","args":["--x"],"env":{"K":"v"}}},"targets":[{"id":"a","label":"A","command":"evil"},{"id":"m","label":"M","server":"n","create":[{"command":"also-evil"}]}]}"#);
+        let added = super::new_executables(&old, &changed);
+        assert_eq!(added.len(), 3, "{added:?}");
+        assert!(added.iter().any(|l| l.contains("evil") && l.starts_with("Target \"a\"")));
+        assert!(added.iter().any(|l| l.contains("--x") && l.contains("K=v")));
+        assert!(added.iter().any(|l| l.contains("also-evil")));
+    }
+
+    use super::*;
+
+    #[test]
+    fn finds_first_url() {
+        assert_eq!(first_url("Created https://gist.github.com/abc123.\n").as_deref(), Some("https://gist.github.com/abc123"));
+        assert_eq!(first_url("no link here"), None);
+    }
+
+    #[test]
+    fn relabels_the_old_pages_label_only() {
+        let mut old = builtin("protected-page", "Password-protected page", "pages");
+        relabel_legacy(&mut old);
+        assert_eq!(old.label, "GitHub Pages");
+        let mut custom = builtin("protected-page", "My pages", "pages");
+        relabel_legacy(&mut custom);
+        assert_eq!(custom.label, "My pages");
+    }
+
+    #[test]
+    fn skips_protected_dirs() {
+        let home = std::env::var("HOME").unwrap();
+        assert!(is_protected_dir(&format!("{home}/Downloads/apache-maven/bin")));
+        assert!(is_protected_dir("~/Desktop"));
+        assert!(!is_protected_dir(&format!("{home}/.local/bin")));
+        assert!(!is_protected_dir(&format!("{home}/DownloadsX/bin")));
+        assert!(!is_protected_dir("/opt/homebrew/bin"));
+    }
+
+    #[test]
+    fn kind_defaults() {
+        let t: Target = serde_json::from_str(r#"{"id":"a","label":"A","server":"s"}"#).unwrap();
+        assert_eq!(t.kind(), "mcp");
+        let t: Target = serde_json::from_str(r#"{"id":"a","label":"A","command":"x"}"#).unwrap();
+        assert_eq!(t.kind(), "command");
+    }
+
+    #[test]
+    fn command_steps_hide_the_command() {
+        let mut t: Target = serde_json::from_str(
+            r#"{"id":"a","label":"A","server":"s","create":[{"tool":"t"},{"command":"secret-cmd"}]}"#,
+        )
+        .unwrap();
+        for s in &mut t.create {
+            s.run = s.command.is_some();
+        }
+        let json = serde_json::to_string(&t).unwrap();
+        assert!(!json.contains("secret-cmd"));
+        assert!(json.contains(r#""run":true"#));
+    }
+
+    #[test]
+    fn step_env_skips_content() {
+        let vars: HashMap<String, String> =
+            [("id", "d1"), ("content", "big"), ("file", "/t/a.md"), ("bad name", "x")]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+        let mut env = step_env(&vars);
+        env.sort();
+        assert_eq!(
+            env,
+            vec![("MDV_FILE".into(), "/t/a.md".into()), ("MDV_ID".into(), "d1".into())]
+        );
+    }
+}

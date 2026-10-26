@@ -1,0 +1,56 @@
+import { useCallback } from "react";
+import { useStore } from "./store";
+import { TitleBar } from "./components/TitleBar";
+import { TabBar } from "./components/TabBar";
+import { Workspace } from "./components/Workspace";
+import { SettingsPanel } from "./components/SettingsPanel";
+import { RemoteBrowser } from "./components/RemoteBrowser";
+import { AboutDialog } from "./components/AboutDialog";
+import { PublishDialog } from "./components/PublishDialog";
+import { TargetsEditor } from "./components/TargetsEditor";
+import { PublishedDialog } from "./components/PublishedDialog";
+import { PublishProgress } from "./components/PublishProgress";
+import { AnnotationLayer } from "./components/AnnotationLayer";
+
+export default function App() {
+  const dropping = useStore((s) => s.dropping);
+  const remoteBrowser = useStore((s) => s.remoteBrowser);
+  const lightboxSrc = useStore((s) => s.lightboxSrc);
+  const setLightbox = useStore((s) => s.setLightbox);
+
+  // Close the lightbox with Escape while it's open.
+  const attachLightbox = useCallback((element: HTMLDivElement | null) => {
+    if (!element) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") useStore.getState().setLightbox(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  return (
+    <div className="app">
+      <TitleBar />
+      <TabBar />
+      <Workspace />
+      {dropping && (
+        <div className="drop-overlay">
+          <span>{remoteBrowser ? "Drop to copy into this remote folder" : "Drop files to open"}</span>
+        </div>
+      )}
+      {lightboxSrc && (
+        <div className="lightbox" ref={attachLightbox} onClick={() => setLightbox(null)}>
+          <img src={lightboxSrc} alt="" />
+        </div>
+      )}
+      <SettingsPanel />
+      <RemoteBrowser />
+      <AboutDialog />
+      <PublishDialog />
+      <TargetsEditor />
+      <PublishedDialog />
+      <PublishProgress />
+      <AnnotationLayer />
+    </div>
+  );
+}
