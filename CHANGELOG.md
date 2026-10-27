@@ -5,6 +5,8 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.20.3] — 2026-10-27
+
 ### Fixed
 - Publishing a remote document with many linked documents could fail for
   some of them with "Connection timed out during banner exchange": every
@@ -626,6 +628,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.20.3]: https://github.com/oztalha/open-md/releases/tag/v0.20.3
 [0.20.2]: https://github.com/oztalha/open-md/releases/tag/v0.20.2
 [0.20.1]: https://github.com/oztalha/open-md/releases/tag/v0.20.1
 [0.20.0]: https://github.com/oztalha/open-md/releases/tag/v0.20.0
