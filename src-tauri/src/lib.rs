@@ -82,8 +82,69 @@ fn validate_host(host: &str) -> Result<(), String> {
 
 fn ssh_base() -> std::process::Command {
     let mut cmd = std::process::Command::new("ssh");
-    cmd.arg("-o").arg("ConnectTimeout=12").arg("-o").arg("BatchMode=yes");
+    cmd.arg("-o").arg("ConnectTimeout=20").arg("-o").arg("BatchMode=yes");
+    cmd.args(mux_opts());
     cmd
+}
+
+/// Share one connection per host (ssh multiplexing). Every read, stat and
+/// listing otherwise opens its own connection: slow through a ProxyCommand,
+/// and publishing many files at once can trip the proxy's or sshd's
+/// connection limits ("Connection timed out during banner exchange").
+fn mux_opts() -> Vec<String> {
+    match control_dir() {
+        Some(dir) => vec![
+            "-o".into(),
+            "ControlMaster=auto".into(),
+            "-o".into(),
+            format!("ControlPath={dir}/%C"),
+            "-o".into(),
+            "ControlPersist=120".into(),
+        ],
+        None => vec![],
+    }
+}
+
+/// `/tmp/openmd-ssh-<uid>`, private to this user (short, for the socket path
+/// limit). If it can't be made safely (someone else's, a symlink, open
+/// permissions), connections just aren't shared.
+fn control_dir() -> Option<&'static str> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    static DIR: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let uid = std::fs::metadata(std::env::var_os("HOME")?).ok()?.uid();
+        let dir = format!("/tmp/openmd-ssh-{uid}");
+        let _ = std::fs::DirBuilder::new().mode(0o700).create(&dir);
+        let meta = std::fs::symlink_metadata(&dir).ok()?;
+        let private = meta.is_dir() && meta.uid() == uid && meta.permissions().mode() & 0o077 == 0;
+        private.then_some(dir)
+    })
+    .as_deref()
+}
+
+/// Run `remote` on `host`, retrying when the connection itself failed (ssh
+/// exits 255 with a connection error), never when the remote command did.
+fn ssh_run(host: &str, remote: &str) -> std::io::Result<std::process::Output> {
+    const TRANSIENT: [&str; 7] = [
+        "banner exchange",
+        "Connection timed out",
+        "Operation timed out",
+        "Connection closed",
+        "Connection reset",
+        "kex_exchange_identification",
+        "Broken pipe",
+    ];
+    let mut delays = [1u64, 3].into_iter();
+    loop {
+        // `--` ends ssh option parsing; the host can never be read as a flag.
+        let output = ssh_base().arg("--").arg(host).arg(remote).output()?;
+        let err = String::from_utf8_lossy(&output.stderr);
+        let transient = output.status.code() == Some(255) && TRANSIENT.iter().any(|t| err.contains(t));
+        match delays.next() {
+            Some(secs) if transient => std::thread::sleep(std::time::Duration::from_secs(secs)),
+            _ => return Ok(output),
+        }
+    }
 }
 
 /// A file's real path (symlinks resolved), so one file has one identity
@@ -101,11 +162,7 @@ async fn real_path(host: Option<String>, path: String) -> Result<String, String>
     }
     validate_host(&host)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
-        let output = ssh_base()
-            .arg("--")
-            .arg(&host)
-            .arg(format!("readlink -f -- {} 2>/dev/null", shell_quote(&path)))
-            .output()
+        let output = ssh_run(&host, &format!("readlink -f -- {} 2>/dev/null", shell_quote(&path)))
             .map_err(|e| format!("Could not run ssh: {e}"))?;
         let real = String::from_utf8_lossy(&output.stdout).trim().to_string();
         Ok(if output.status.success() && real.starts_with('/') { real } else { path })
@@ -124,11 +181,7 @@ async fn remote_stat(host: String, path: String) -> Result<String, String> {
     validate_host(&host)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let q = shell_quote(&path);
-        let output = ssh_base()
-            .arg("--")
-            .arg(&host)
-            .arg(format!("stat -c '%Y %s' -- {q} 2>/dev/null || stat -f '%m %z' -- {q}"))
-            .output()
+        let output = ssh_run(&host, &format!("stat -c '%Y %s' -- {q} 2>/dev/null || stat -f '%m %z' -- {q}"))
             .map_err(|e| format!("Could not run ssh: {e}"))?;
         if !output.status.success() {
             return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
@@ -154,11 +207,7 @@ async fn read_remote_bytes(host: String, path: String) -> Result<String, String>
     }
     validate_host(&host)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
-        let output = ssh_base()
-            .arg("--")
-            .arg(&host)
-            .arg(format!("head -c {} -- {}", REMOTE_IMAGE_LIMIT + 1, shell_quote(&path)))
-            .output()
+        let output = ssh_run(&host, &format!("head -c {} -- {}", REMOTE_IMAGE_LIMIT + 1, shell_quote(&path)))
             .map_err(|e| format!("Could not run ssh: {e}"))?;
         if !output.status.success() {
             return Err(format!("Could not read {host}:{path}: {}", String::from_utf8_lossy(&output.stderr).trim()));
@@ -180,12 +229,7 @@ async fn read_remote(host: String, path: String) -> Result<String, String> {
     }
     validate_host(&host)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
-        let output = ssh_base()
-            // `--` ends ssh option parsing; the host can never be read as a flag.
-            .arg("--")
-            .arg(&host)
-            .arg(format!("cat -- {}", shell_quote(&path)))
-            .output()
+        let output = ssh_run(&host, &format!("cat -- {}", shell_quote(&path)))
             .map_err(|e| format!("Could not run ssh: {e}"))?;
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr);
@@ -227,12 +271,7 @@ async fn list_remote(host: String, path: String) -> Result<RemoteListing, String
     validate_host(&host)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<RemoteListing, String> {
         let q = shell_quote(if path.is_empty() { "~" } else { &path });
-        let output = ssh_base()
-            // `--` ends ssh option parsing; the host can never be read as a flag.
-            .arg("--")
-            .arg(&host)
-            .arg(format!("cd -- {q} && pwd && {{ ls -1ApL 2>/dev/null || true; }}"))
-            .output()
+        let output = ssh_run(&host, &format!("cd -- {q} && pwd && {{ ls -1ApL 2>/dev/null || true; }}"))
             .map_err(|e| format!("Could not run ssh: {e}"))?;
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr);
@@ -260,11 +299,7 @@ async fn list_remote(host: String, path: String) -> Result<RemoteListing, String
 async fn make_remote_dir(host: String, path: String) -> Result<(), String> {
     validate_host(&host)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        let output = ssh_base()
-            .arg("--")
-            .arg(&host)
-            .arg(format!("mkdir -p -- {}", shell_quote(&path)))
-            .output()
+        let output = ssh_run(&host, &format!("mkdir -p -- {}", shell_quote(&path)))
             .map_err(|e| format!("Could not run ssh: {e}"))?;
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr);
@@ -291,7 +326,9 @@ async fn upload_remote(host: String, local_paths: Vec<String>, dir: String) -> R
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let target = format!("{host}:{}/", dir.trim_end_matches('/'));
         let output = std::process::Command::new("/usr/bin/scp")
-            .args(["-o", "ConnectTimeout=12", "-o", "BatchMode=yes", "-r", "-q", "--"])
+            .args(["-o", "ConnectTimeout=20", "-o", "BatchMode=yes", "-r", "-q"])
+            .args(mux_opts())
+            .arg("--")
             .args(&local_paths)
             .arg(&target)
             .output()
@@ -317,7 +354,9 @@ async fn download_remote(host: String, remote_path: String, local_path: String) 
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let source = format!("{host}:{remote_path}");
         let output = std::process::Command::new("/usr/bin/scp")
-            .args(["-o", "ConnectTimeout=12", "-o", "BatchMode=yes", "-r", "-q", "--"])
+            .args(["-o", "ConnectTimeout=20", "-o", "BatchMode=yes", "-r", "-q"])
+            .args(mux_opts())
+            .arg("--")
             .arg(&source)
             .arg(&local_path)
             .output()

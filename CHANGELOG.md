@@ -5,6 +5,14 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Fixed
+- Publishing a remote document with many linked documents could fail for
+  some of them with "Connection timed out during banner exchange": every
+  file read opened a new ssh connection, which a ProxyCommand or the host's
+  connection limit can refuse. OpenMD now shares one connection per host
+  (ssh multiplexing, in a private folder under `/tmp`) and retries a
+  connection that drops. Remote files also open faster after the first.
+
 ## [0.20.2] — 2026-10-26
 
 ### Fixed
