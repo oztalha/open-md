@@ -5,6 +5,13 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Changed
+- **Faster publishing with linked documents:** they're published four at a
+  time instead of one by one, so a document with a dozen links goes up in
+  roughly a quarter of the time. Each publish gets its own temporary folder,
+  so two linked files with the same name (`FINDINGS.md` in two folders) can't
+  mix up their contents.
+
 ## [0.20.3] — 2026-10-27
 
 ### Fixed

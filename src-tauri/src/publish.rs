@@ -303,15 +303,36 @@ pub async fn publish_config_write(app: tauri::AppHandle, text: String) -> Result
 /// as the title / content type (e.g. `Notes.md`).
 #[tauri::command]
 pub fn publish_write_temp(name: String, contents: String) -> Result<String, String> {
+    let path = temp_path(&name, "document.md")?;
+    std::fs::write(&path, contents).map_err(|e| e.to_string())?;
+    Ok(path.display().to_string())
+}
+
+/// A fresh temp path keeping the file's own name (some services take it as the
+/// title), in its own folder: linked documents publish in parallel, and two of
+/// them may share a name (`FINDINGS.md` in two folders). Folders older than a
+/// day are cleared now and then.
+fn temp_path(name: &str, fallback: &str) -> Result<PathBuf, String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    static SWEPT: OnceLock<()> = OnceLock::new();
+    let root = std::env::temp_dir().join("md-viewer-publish");
+    SWEPT.get_or_init(|| {
+        let day = Duration::from_secs(24 * 3600);
+        for entry in std::fs::read_dir(&root).into_iter().flatten().flatten() {
+            let old = entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > day);
+            if old {
+                let _ = if entry.path().is_dir() { std::fs::remove_dir_all(entry.path()) } else { std::fs::remove_file(entry.path()) };
+            }
+        }
+    });
     let safe: String = name
         .chars()
         .map(|c| if c == '/' || c == '\\' || c == ':' || c.is_control() { '-' } else { c })
         .collect();
-    let dir = std::env::temp_dir().join("md-viewer-publish");
+    let dir = root.join(format!("{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join(if safe.trim().is_empty() { "document.md".to_string() } else { safe });
-    std::fs::write(&path, contents).map_err(|e| e.to_string())?;
-    Ok(path.display().to_string())
+    Ok(dir.join(if safe.trim().is_empty() { fallback.to_string() } else { safe }))
 }
 
 // --- environment -------------------------------------------------------------
@@ -791,13 +812,7 @@ pub async fn publish_step_command(
 pub fn publish_write_temp_bytes(name: String, data: String) -> Result<String, String> {
     use base64::Engine;
     let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?;
-    let safe: String = name
-        .chars()
-        .map(|c| if c == '/' || c == '\\' || c == ':' || c.is_control() { '-' } else { c })
-        .collect();
-    let dir = std::env::temp_dir().join("md-viewer-publish").join("images");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join(if safe.trim().is_empty() { "image".to_string() } else { safe });
+    let path = temp_path(&name, "image")?;
     std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
     Ok(path.display().to_string())
 }

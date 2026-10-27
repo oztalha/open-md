@@ -838,6 +838,21 @@ async function uploadImages(
   return rewriteImages(contents, urls);
 }
 
+/** Linked documents published at once (each mostly waits on the service). */
+const LINKED_AT_ONCE = 4;
+
+/** Run `fn` over `items`, at most `limit` at a time; resolves when all are done. */
+async function inParallel<T>(items: T[], limit: number, fn: (item: T, index: number) => Promise<unknown>): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
 /** Images that couldn't be uploaded during the current publish. */
 let imageWarnings: string[] = [];
 
@@ -873,9 +888,10 @@ export async function publishDoc(
 
   if (options.linked) {
     // Two links to one file through different paths publish it once.
+    const entries = linkedDocs(doc);
+    await inParallel(entries, LINKED_AT_ONCE, (entry) => resolveRealKey(entry.doc));
     const byReal = new Map<string, LinkedDoc>();
-    for (const entry of linkedDocs(doc)) {
-      await resolveRealKey(entry.doc);
+    for (const entry of entries) {
       const real = recordKey(entry.doc) ?? keyForDoc(entry.doc) ?? "";
       const seen = byReal.get(real);
       if (seen) seen.hrefs.push(...entry.hrefs);
@@ -883,8 +899,11 @@ export async function publishDoc(
     }
     const links = [...byReal.values()];
     const urls = new Map<string, string>();
-    for (const [i, { doc: linked, hrefs }] of links.entries()) {
-      options.onProgress?.(`linked document ${i + 1} of ${links.length}: ${linked.title}`);
+    const failed: string[] = new Array(links.length);
+    let finished = 0;
+    if (links.length > 0) options.onProgress?.(`linked documents: 0 of ${links.length}`);
+    // A few at a time: each is mostly waiting on the service.
+    await inParallel(links, LINKED_AT_ONCE, async ({ doc: linked, hrefs }, i) => {
       try {
         // A linked document published before keeps its own protection and
         // password; only new ones take this publish's choices.
@@ -904,16 +923,18 @@ export async function publishDoc(
         for (const href of hrefs) urls.set(href, url);
         linkedCount++;
       } catch (err) {
-        skipped.push(`${linked.title}: ${err instanceof Error ? err.message : String(err)}`);
+        failed[i] = `${linked.title}: ${err instanceof Error ? err.message : String(err)}`;
       }
-    }
+      options.onProgress?.(`linked documents: ${++finished} of ${links.length}`);
+    });
+    skipped.push(...failed.filter(Boolean));
     markdown = rewriteLinks(markdown, urls);
     options.onProgress?.(displayTitle(doc));
   } else {
     // Linked documents aren't republished, but links to the ones already
     // published here still point at their pages; only never-published ones
     // stay as file paths.
-    for (const { doc: linked } of linkedDocs(doc)) await resolveRealKey(linked);
+    await inParallel(linkedDocs(doc), LINKED_AT_ONCE, ({ doc: linked }) => resolveRealKey(linked));
     markdown = rewriteLinks(markdown, publishedLinks(doc, target.id));
   }
 
