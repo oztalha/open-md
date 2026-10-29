@@ -5,6 +5,8 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.20.5] — 2026-10-29
+
 ### Fixed
 - In the sidebar, a long **Recent** list squeezed **Open** down to a couple
   of rows. Open files now keep their room (up to 60% of the sidebar), and the
@@ -643,6 +645,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.20.5]: https://github.com/oztalha/open-md/releases/tag/v0.20.5
 [0.20.4]: https://github.com/oztalha/open-md/releases/tag/v0.20.4
 [0.20.3]: https://github.com/oztalha/open-md/releases/tag/v0.20.3
 [0.20.2]: https://github.com/oztalha/open-md/releases/tag/v0.20.2
