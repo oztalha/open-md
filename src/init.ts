@@ -190,6 +190,16 @@ function handleMenu(id: string) {
       else s.setPublishOpen(true); // nothing published yet: offer to publish
       break;
     }
+    case "search-files": {
+      // Pressed again in the box: back to the file list.
+      const box = document.activeElement;
+      if (box instanceof HTMLInputElement && box.classList.contains("file-search-input")) {
+        window.dispatchEvent(new CustomEvent("mdv-file-search-close"));
+      } else {
+        s.focusFileSearch();
+      }
+      break;
+    }
     case "show-files":
       s.showSidebarTab("files");
       break;

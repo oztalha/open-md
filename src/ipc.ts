@@ -76,6 +76,22 @@ export function makeRemoteDir(host: string, path: string): Promise<void> {
   return invoke<void>("make_remote_dir", { host, path });
 }
 
+export interface SearchHit {
+  path: string;
+  line: number;
+  text: string;
+}
+
+/** `grep` files for a word or phrase: local (`host` null) or one ssh call per host. */
+export function searchFiles(
+  host: string | null,
+  paths: string[],
+  pattern: string,
+  opts: { caseSensitive: boolean; wholeWord: boolean; regex: boolean },
+): Promise<SearchHit[]> {
+  return invoke<SearchHit[]>("search_files", { host, paths, pattern, ...opts });
+}
+
 /** A file's real path (symlinks resolved); the path as given if unresolvable. */
 export function realPath(host: string | null, path: string): Promise<string> {
   return invoke<string>("real_path", { host, path });

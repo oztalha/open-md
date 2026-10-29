@@ -3465,3 +3465,132 @@ input[type="checkbox"]:disabled,
 input[type="radio"]:disabled {
   opacity: 0.5;
 }
+
+/* Search in Files (⇧⌘F), at the top of the Files tab. */
+.file-search {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 6px;
+}
+.file-search-field {
+  width: auto;
+}
+.file-search-field input {
+  font-size: 12.5px;
+}
+.file-search button {
+  all: unset;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--fg-muted);
+  cursor: default;
+}
+.file-search button:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+.file-search .find-opt {
+  height: 20px;
+  min-width: 22px;
+  padding: 0 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.file-search .find-opt.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.file-search-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+.file-search-scope {
+  display: flex;
+  gap: 2px;
+}
+.file-search-scope button {
+  padding: 2px 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.file-search-scope button.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.file-search-status {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-search-results {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 4px 10px;
+}
+.file-search-file + .file-search-file {
+  margin-top: 6px;
+}
+.file-search-file-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 3px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.file-search-file-name .sidebar-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-search-hit {
+  all: unset;
+  display: flex;
+  gap: 8px;
+  width: calc(100% - 16px);
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+  cursor: default;
+}
+.file-search-hit:hover {
+  background: var(--code-bg);
+  color: var(--fg);
+}
+.file-search-line {
+  flex: none;
+  min-width: 26px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+.file-search-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-search-text mark {
+  background: var(--search-match);
+  color: var(--fg);
+  border-radius: 2px;
+}
+.file-search-problem {
+  margin: 8px;
+  font-size: 11.5px;
+  color: var(--fg-faint);
+}

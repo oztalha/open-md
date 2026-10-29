@@ -63,6 +63,122 @@ fn shell_quote(path: &str) -> String {
     }
 }
 
+#[derive(serde::Serialize)]
+struct SearchHit {
+    path: String,
+    line: u32,
+    text: String,
+}
+
+/// Matches per file and files per search are capped; a line is cut to this.
+const SEARCH_MAX_PER_FILE: &str = "50";
+const SEARCH_MAX_FILES: usize = 500;
+const SEARCH_LINE_CHARS: usize = 400;
+
+fn grep_flags(case_sensitive: bool, whole_word: bool, regex: bool) -> Vec<&'static str> {
+    // -I skips binary files, -s missing ones (a recent file may be gone).
+    let mut flags = vec!["-n", "-H", "-I", "-s", "-m", SEARCH_MAX_PER_FILE];
+    flags.push(if regex { "-E" } else { "-F" });
+    if !case_sensitive {
+        flags.push("-i");
+    }
+    if whole_word {
+        flags.push("-w");
+    }
+    flags
+}
+
+/// `grep -n -H` output to hits. A path may contain `:`, so a line is split
+/// after the longest searched path it starts with, else at the first `:N:`.
+fn parse_grep(out: &str, paths: &[String]) -> Vec<SearchHit> {
+    let mut hits = Vec::new();
+    for line in out.lines() {
+        let known = paths
+            .iter()
+            .filter(|p| line.len() > p.len() && line.starts_with(p.as_str()) && line.as_bytes()[p.len()] == b':')
+            .max_by_key(|p| p.len());
+        let (path, rest) = match known {
+            Some(p) => (p.clone(), &line[p.len() + 1..]),
+            None => match line.match_indices(':').find(|(i, _)| {
+                let tail = &line[i + 1..];
+                let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
+                digits > 0 && tail.as_bytes().get(digits) == Some(&b':')
+            }) {
+                Some((i, _)) => (line[..i].to_string(), &line[i + 1..]),
+                None => continue,
+            },
+        };
+        let Some((num, text)) = rest.split_once(':') else { continue };
+        let Ok(line_no) = num.parse() else { continue };
+        hits.push(SearchHit { path, line: line_no, text: text.chars().take(SEARCH_LINE_CHARS).collect() });
+    }
+    hits
+}
+
+/// Search files for a word or phrase with `grep`: local files directly, a
+/// remote host's files in one `grep` over its (shared) ssh connection.
+#[tauri::command]
+async fn search_files(
+    host: Option<String>,
+    paths: Vec<String>,
+    pattern: String,
+    case_sensitive: bool,
+    whole_word: bool,
+    regex: bool,
+) -> Result<Vec<SearchHit>, String> {
+    if pattern.is_empty() || paths.is_empty() {
+        return Ok(vec![]);
+    }
+    if let Some(h) = &host {
+        if github::is_github(h) {
+            return Err("GitHub files are searched when opened".into());
+        }
+        validate_host(h)?;
+    }
+    let paths: Vec<String> = paths.into_iter().take(SEARCH_MAX_FILES).collect();
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<SearchHit>, String> {
+        let flags = grep_flags(case_sensitive, whole_word, regex);
+        let out = match &host {
+            None => {
+                let output = std::process::Command::new("/usr/bin/grep")
+                    .args(&flags)
+                    .arg("-e")
+                    .arg(&pattern)
+                    .arg("--")
+                    .args(&paths)
+                    .output()
+                    .map_err(|e| format!("Could not run grep: {e}"))?;
+                // 0: matches, 1: none; 2 also covers a missing file, whose
+                // matches in the other files are still printed.
+                if output.status.code() == Some(2) && output.stdout.is_empty() && !output.stderr.is_empty() && regex {
+                    return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+                }
+                output.stdout
+            }
+            Some(h) => {
+                let quote = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
+                let files: Vec<String> = paths.iter().map(|p| shell_quote(p)).collect();
+                // `; true`: grep's own exit codes stay out of ssh's, so 255
+                // means the connection failed. Output is capped.
+                let remote = format!(
+                    "grep {} -e {} -- {} 2>/dev/null | head -c 4000000; true",
+                    flags.join(" "),
+                    quote(&pattern),
+                    files.join(" ")
+                );
+                let output = ssh_run(h, &remote).map_err(|e| format!("Could not run ssh: {e}"))?;
+                if !output.status.success() {
+                    return Err(format!("Could not reach {h}: {}", String::from_utf8_lossy(&output.stderr).trim()));
+                }
+                output.stdout
+            }
+        };
+        Ok(parse_grep(&String::from_utf8_lossy(&out), &paths))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Reject anything that isn't a plain `[user@]host` token. Critically this
 /// blocks a leading `-`, which `ssh` would otherwise treat as an option
 /// (e.g. `-oProxyCommand=…` = arbitrary command execution) — reachable via the
@@ -735,6 +851,11 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
                 .accelerator("Shift+CmdOrCtrl+G")
                 .build(app)?,
         )
+        .item(
+            &MenuItemBuilder::with_id("search-files", "Search in Files…")
+                .accelerator("Shift+CmdOrCtrl+F")
+                .build(app)?,
+        )
         .separator()
         .item(
             &MenuItemBuilder::with_id("copy-path", "Copy Path")
@@ -777,7 +898,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         )
         .item(
             &MenuItemBuilder::with_id("show-files", "Files")
-                .accelerator("Shift+CmdOrCtrl+F")
+                .accelerator("Shift+CmdOrCtrl+1")
                 .build(app)?,
         )
         .item(
@@ -1008,6 +1129,7 @@ pub fn run() {
             github::github_resolve_url,
             github::gh_accounts,
             write_remote,
+            search_files,
             real_path,
             make_remote_dir,
             allow_asset,
@@ -1074,4 +1196,18 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod search_tests {
+    #[test]
+    fn grep_output_with_colons_in_paths() {
+        let paths = vec!["/a/b.md".to_string(), "/x/notes: v2.md".to_string()];
+        let out = "/a/b.md:3:hello: world\n/x/notes: v2.md:12:found it\n/other/c.md:7:x\n";
+        let hits = super::parse_grep(out, &paths);
+        assert_eq!(hits.len(), 3);
+        assert_eq!((hits[0].path.as_str(), hits[0].line, hits[0].text.as_str()), ("/a/b.md", 3, "hello: world"));
+        assert_eq!((hits[1].path.as_str(), hits[1].line), ("/x/notes: v2.md", 12));
+        assert_eq!((hits[2].path.as_str(), hits[2].line), ("/other/c.md", 7));
+    }
 }

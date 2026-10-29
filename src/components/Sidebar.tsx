@@ -19,6 +19,7 @@ import { showRecentContextMenu, showTileContextMenu } from "../contextMenu";
 import { OutlineList } from "./Outline";
 import { useModHeld } from "../keybindings/useModHeld";
 import { formatKeybind, keybindFor, useSettings } from "../settings";
+import { FileSearch } from "./FileSearch";
 
 /** Name + a dim hint of where it lives: the host, or "local". */
 const OPEN_HEIGHT_KEY = "sidebarOpenHeight";
@@ -205,7 +206,7 @@ export function Sidebar() {
       {tab === "outline" ? (
         <OutlineList />
       ) : (
-        <>
+        <FileSearch>
           <div className="sidebar-header">Open</div>
           <nav
             ref={openList}
@@ -379,7 +380,7 @@ export function Sidebar() {
               </nav>
             </>
           )}
-        </>
+        </FileSearch>
       )}
       <div className="sidebar-resizer" onPointerDown={startResize} />
     </aside>

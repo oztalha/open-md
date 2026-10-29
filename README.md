@@ -180,7 +180,8 @@ Details, the config format and the security model:
 | Close tab | ⌘W |
 | Editor · Split · Preview | ⇧⌘7 · ⇧⌘8 · ⇧⌘9 |
 | Toggle editor ⇄ preview | ⇧⌘V |
-| Sidebar: Files · Outline | ⇧⌘F · ⇧⌘0 |
+| Search in files (open + recent) | ⇧⌘F |
+| Sidebar: Files · Outline | ⇧⌘1 · ⇧⌘0 |
 | Line numbers on / off | ⇧⌘N |
 | Select all | ⌘A |
 | Find and replace / next / previous | ⌘F / ⌘G / ⇧⌘G |

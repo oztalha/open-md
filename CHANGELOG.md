@@ -5,6 +5,19 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Added
+- **Search in Files** (⇧⌘F, or the box at the top of the Files tab): find a
+  word or phrase in all open files, or open and recent files. Results are
+  grouped by file with the matching lines highlighted; click one to open it
+  at that line. Match case, whole word and regular expressions work like
+  Find. Open files are searched in memory (unsaved edits too); recent files
+  on an ssh host are searched with one `grep` over its connection, and
+  results come in as each host answers.
+
+### Changed
+- **Files** (the sidebar tab) moved to ⇧⌘1, next to Outline's ⇧⌘0, so ⇧⌘F
+  can search.
+
 ## [0.20.5] — 2026-10-29
 
 ### Fixed

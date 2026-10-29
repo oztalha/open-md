@@ -99,6 +99,8 @@ interface AppState {
   publishOpen: boolean;
   /** Whether the Published Documents window is showing. */
   publishedOpen: boolean;
+  /** Bumped by ⇧⌘F: the sidebar focuses its Search in Files box. */
+  fileSearchTick: number;
   /** Bumped after each publish so views re-read saved links. */
   publishTick: number;
   /** Failed GitHub syncs, by `publishErrorKey(doc key, target id)`. */
@@ -137,6 +139,8 @@ interface AppState {
   setRemoteDrop(paths: string[] | null): void;
   setPublishOpen(open: boolean): void;
   setPublishedOpen(open: boolean): void;
+  /** Show the Files tab and focus its search box (⇧⌘F). */
+  focusFileSearch(): void;
   bumpPublished(): void;
   setPublishError(key: string, message: string | null): void;
   setPublishJob(job: PublishJob | null): void;
@@ -225,6 +229,7 @@ export const useStore = create<AppState>()((set, get) => ({
   remoteDrop: null,
   publishOpen: false,
   publishedOpen: false,
+  fileSearchTick: 0,
   publishTick: 0,
   publishErrors: {},
   publishJob: null,
@@ -435,6 +440,11 @@ export const useStore = create<AppState>()((set, get) => ({
 
   toggleOutline() {
     get().showSidebarTab("outline");
+  },
+
+  focusFileSearch() {
+    get().setSidebarTab("files");
+    set((s) => ({ fileSearchTick: s.fileSearchTick + 1 }));
   },
 
   setSidebarTab(tab) {
