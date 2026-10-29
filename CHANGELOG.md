@@ -5,6 +5,8 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-10-29
+
 ### Added
 - **Search in Files** (⇧⌘F, or the box at the top of the Files tab): find a
   word or phrase in all open files, or open and recent files. Results are
@@ -658,6 +660,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.21.0]: https://github.com/oztalha/open-md/releases/tag/v0.21.0
 [0.20.5]: https://github.com/oztalha/open-md/releases/tag/v0.20.5
 [0.20.4]: https://github.com/oztalha/open-md/releases/tag/v0.20.4
 [0.20.3]: https://github.com/oztalha/open-md/releases/tag/v0.20.3

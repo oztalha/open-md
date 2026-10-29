@@ -1,7 +1,7 @@
 {
   "name": "open-md",
   "private": true,
-  "version": "0.20.5",
+  "version": "0.21.0",
   "description": "A minimal, fast, native-feeling markdown editor/viewer for macOS.",
   "author": "Max Leiter",
   "license": "MIT",
