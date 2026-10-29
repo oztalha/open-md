@@ -5,6 +5,8 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.21.1] — 2026-10-29
+
 ### Fixed
 - Search in Files: a match far into a long line could be cut off in the
   narrow sidebar; snippets now start just before the match. Recent remote
@@ -667,6 +669,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.21.1]: https://github.com/oztalha/open-md/releases/tag/v0.21.1
 [0.21.0]: https://github.com/oztalha/open-md/releases/tag/v0.21.0
 [0.20.5]: https://github.com/oztalha/open-md/releases/tag/v0.20.5
 [0.20.4]: https://github.com/oztalha/open-md/releases/tag/v0.20.4
