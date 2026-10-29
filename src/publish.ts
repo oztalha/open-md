@@ -196,6 +196,11 @@ export function forgetPublished(gone: (entry: PublishLogEntry) => boolean): void
 
 function appendLog(entry: PublishLogEntry): void {
   const log = loadLog();
+  // The very first publish seeds the log from the records, which already
+  // hold this one (untitled, a moment ago): replace it instead of adding a
+  // second entry.
+  const seeded = log.findIndex((e) => e.url === entry.url && !e.title && Math.abs(e.at - entry.at) < 5000);
+  if (seeded >= 0) log.splice(seeded, 1);
   log.push(entry);
   localStorage.setItem(LOG_KEY, JSON.stringify(log));
 }

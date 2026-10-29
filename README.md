@@ -1,16 +1,16 @@
 # OpenMD
 
-A fast, native-feeling markdown editor and viewer for macOS — **for files on
-your Mac, on any machine you can `ssh` to, and in GitHub repos.**
+**Read your agents' markdown wherever it's written. Share it wherever people read.**
 
-Read and edit markdown wherever it lives: a dev box, a cloud desktop, the
-machine your coding agent runs on, or a repo. When something rewrites a file
-you have open, it **reloads on its own**. And when someone else needs to read
-it, **Publish** turns it into a link: a secret gist, a page on your GitHub
-Pages (with or without a password), or any place you set up, kept up to date
-as the file changes.
+Coding agents write their reports, plans and findings as markdown, on a dev
+box, a cloud desktop, or in a repo. OpenMD opens them right where they are
+(over `ssh`, from GitHub, or on your Mac), keeps up as the agent rewrites
+them, finds anything across all of them, and turns them into a link people
+can open: a gist, a page on your GitHub Pages (public or password-protected),
+or your team's own docs system. Linked documents and images go along, and the
+link stays the same every time you update it.
 
-![Remote files open as tabs, with the host shown in the title bar](docs/remote-tabs.png)
+![An agent's report on a remote machine, open in OpenMD: editor and rendered preview side by side](docs/remote-report.png)
 
 ## Install (Apple Silicon)
 
@@ -21,7 +21,7 @@ it, and drag **OpenMD.app** to Applications.
 **First launch:** the app isn't notarized by Apple yet, so macOS will say it
 can't verify it. Click **Done**, then open **System Settings → Privacy &
 Security**, scroll to **Security**, and click **Open Anyway** next to
-*"Markdown" was blocked*. You only do this once.
+*"OpenMD" was blocked*. You only do this once.
 
 If your Mac doesn't offer Open Anyway (some company-managed Macs hide it), run
 this once instead:
@@ -33,37 +33,81 @@ xattr -dr com.apple.quarantine /Applications/OpenMD.app
 Or [build it yourself](#build-from-source). See [CHANGELOG.md](CHANGELOG.md)
 for what's new in each version.
 
-## How it fits your day
+## From agent output to a shared link
 
-### 1. Open the file, wherever it is
+### 1. Open it where the agent wrote it
 
-- **On your Mac:** ⌘O, drag a file onto the window, or open `.md` files from
-  Finder. Recent and pinned files wait in the sidebar.
 - **On another machine:** **Open Remote…** (⇧⌘O) browses any host you can
-  `ssh` to. OpenMD uses your system `ssh`, so `~/.ssh/config` aliases,
-  keys, jump hosts and `ProxyCommand` just work, and nothing is installed on
-  the remote side.
+  `ssh` to. OpenMD uses your own `ssh`, so `~/.ssh/config` aliases, keys,
+  jump hosts and `ProxyCommand` just work, and **nothing is installed on the
+  remote side**. One shared connection per host keeps it fast.
 - **In a GitHub repo:** in Open Remote…, click **Open from GitHub…** and paste
-  a link to a repo, folder or file, or type `owner/repo` (`owner/repo@branch`
-  for another branch). Private repos work through your
-  [`gh`](https://cli.github.com) login; if the active account can't see a
-  repo, your other logged-in `gh` accounts are tried. GitHub files open
-  read-only, images included.
-- **A whole folder at once:** **Open all .md files** at the bottom of the
-  browser opens every markdown file in the folder you're looking at.
-- **From a terminal or an agent:** `mdv host:/path/report.md`, or a clickable
-  `mdviewer://open?host=…&path=…` link. Add `:LINE` (`notes.md:33`,
-  `host:/path/run.py:120`) and it opens at that line.
-
-Every file opens as a tab: drag to reorder, **⌘1–9** to jump, **⌃Tab** to
-cycle. The title bar shows `host:` for remote files, and the active tab shows
-its word and character count.
-
-![Remote file browser](docs/remote-browser.png)
+  a link to a repo, folder or file, or type `owner/repo`. Private repos work
+  through your [`gh`](https://cli.github.com) login.
+- **From the agent itself:** have it print `mdv host:/path/report.md` or a
+  clickable `mdviewer://open?host=…&path=…` link (add `:LINE` to open at a
+  line). See [the `mdv` launcher](#command-line-launcher-mdv).
+- **On your Mac:** ⌘O, drag a file onto the window, or open `.md` files from
+  Finder. **Open all .md files** opens every report in a folder at once.
 
 ![A GitHub folder in Open Remote, with Open from GitHub and Open all .md files](docs/github-remote.png)
 
-### 2. Read and write comfortably
+### 2. Keep up as it changes, and find anything
+
+- **Live reload:** when the agent rewrites a file you have open, it reloads in
+  place and keeps your scroll position. Unsaved edits are never overwritten:
+  a bar offers **Reload** or **Keep mine**.
+- **Search in Files** (⇧⌘F): one search across every open and recent file,
+  local and remote, with match case, whole word and regex. Remote files are
+  searched with one `grep` per host; click a result to open it at that line.
+- **Links between reports work:** `[findings](notes/findings.md)`, a bare
+  `notes/plan.md` in the text, and links to headings (`[RC1](#rc1-…)`) all
+  open or scroll where they point.
+- **Find your way:** an **Outline** of the headings (⇧⌘0), and **Find and
+  replace** (⌘F) in the editor or the rendered preview.
+
+![Search in Files: one search across open and recent files on this Mac and a remote host](docs/search-in-files.png)
+
+### 3. Share it with a link
+
+**Publish…** (⇧⌘P) turns the document into a link and copies it.
+Republishing updates the same page, so the link you sent keeps working.
+
+- **Linked documents go along:** the report's linked documents are published
+  with it (four at a time) and its links point to their pages. Targets set up
+  to upload images (see [PUBLISHING.md](docs/PUBLISHING.md)) take its images
+  too.
+- **Secret GitHub Gist:** anyone with the link can read it.
+- **GitHub Pages:** a page on your own GitHub Pages, public or, with **Require
+  a password**, encrypted in the app so only readers with the password can
+  open it. Nothing to set up: the first publish creates the repo. Published
+  pages follow the reader's light or dark mode, highlight code, draw
+  diagrams, and have an outline.
+- **Your team's own places:** **Edit targets…** adds any docs system or
+  server through a local MCP server or a command, starting from examples.
+- **Keep in sync with GitHub:** for a document opened from GitHub, the
+  published copy follows the repo, whoever pushes.
+
+![Publishing a report with its two linked documents](docs/publish-linked.png)
+
+![Password-protected GitHub Pages: a generated password, kept in your Keychain](docs/protected-page.png)
+
+![What readers see: a password prompt that can remember this device](docs/protected-reader.png)
+
+### 4. Keep track of what you shared
+
+**Published Documents** (⌘P, or the button next to Publish in the title bar)
+lists everything you've published, newest first. Paste a link to find the
+file behind it, open that file, or copy a protected page's password.
+**Update an existing page instead…** links a document to a page published
+from another Mac, and **Unpublish** takes a page down.
+
+![Published Documents: every published page, its source file and its link](docs/published-documents.png)
+
+Details, the config format and the security model:
+[docs/PUBLISHING.md](docs/PUBLISHING.md).
+
+## A good markdown editor, too
 
 - **Editor, split, or preview** per document; **⇧⌘V** flips between editor
   and preview and keeps your place.
@@ -71,92 +115,33 @@ its word and character count.
   visible. Formatting shortcuts, task checkboxes (⌘↩), Tab between table
   cells, and **Format document** with Prettier.
 - **GitHub-flavored preview:** tables, task lists, alerts, footnotes,
-  highlighted code, images, LaTeX math with KaTeX (`$inline$`,
-  `$$display$$`, ```` ```math ````), and Mermaid diagrams.
-- **Not just markdown:** code and JSON files open highlighted (JSON
-  pretty-printed, JSONL one block per record), CSV/TSV as tables, and
-  PNG/JPG/SVG as images. **Line numbers** with ⇧⌘N.
-- **Links between documents work:** `[findings](FINDINGS.md)`, and even a bare
-  `notes/plan.md` in the text, open the file.
-- **Find your way:** **Outline** in the sidebar (⇧⌘0), **Find and replace**
-  (⌘F) in the editor or the rendered preview with match case, whole word and
-  regex, and highlights with notes in the preview.
+  highlighted code, images, LaTeX math with KaTeX, and Mermaid diagrams.
+- **Not just markdown:** code and JSON files open highlighted, CSV/TSV as
+  tables, PNG/JPG/SVG as images. **Line numbers** with ⇧⌘N.
 - **Copy from the preview** keeps paragraphs and lists when pasted into Slack
   and other rich-text apps. Light and dark themes.
-
-![Editor and preview side by side](docs/editor-split.png)
+- **Move files:** **Save to Remote…** (⇧⌘S) saves to any host (and creates
+  missing folders), drag files from Finder onto the remote browser to copy
+  them over, and **Download…** brings remote files to your Mac.
 
 ![LaTeX math rendered with KaTeX](docs/math.png)
 
 ![A Python file on a remote machine, highlighted with line numbers](docs/code.png)
 
-### 3. Keep up while files change
+## How it compares
 
-- **Auto-reload:** when an open file changes outside the app (an agent
-  rewriting a report, another editor, `git pull`, a push to the GitHub repo),
-  it reloads in place and keeps your scroll position. Unsaved edits are never
-  overwritten: a bar offers **Reload** or **Keep mine**. Turn it off in
-  Settings.
-- **Saving goes back where the file came from:** ⌘S on a remote document
-  writes over SSH, atomically. ⌘R reloads by hand.
+| | OpenMD | Typora, iA Writer, MacDown | Obsidian | VS Code preview |
+| --- | :---: | :---: | :---: | :---: |
+| Open files on a remote machine over `ssh` | ✅ nothing to install | ❌ | ❌ | with a remote server installed on the host |
+| Open files straight from a GitHub repo | ✅ | ❌ | ❌ | with an extension |
+| Reloads while an agent rewrites the file | ✅ | some | ✅ | ✅ |
+| One search across local and remote files | ✅ | ❌ | its vault only | its workspace only |
+| Publish to a link, linked documents and images included | ✅ | export to a file | with paid Obsidian Publish | ❌ |
+| Password-protected pages, encrypted in the app | ✅ | ❌ | ❌ | ❌ |
+| Same link on every update; find the file behind any link | ✅ | ❌ | with Publish | ❌ |
 
-### 4. Move files where they need to be
-
-- **Save to Remote…** (⇧⌘S) saves a new or local document to any host; after
-  that, ⌘S writes back there. Typing a folder that doesn't exist yet offers
-  **Create Folder**.
-- **Copy files over:** drag files or folders from Finder onto the remote
-  browser to copy them into the folder it shows (any file type, via `scp`);
-  it asks before replacing anything.
-- **Download:** click a file that isn't text (archives, images, PDFs, …) or
-  right-click → **Download…**.
-- **⇧⌘C** copies the document's path (or `host:/path`, if you turn that on in
-  Settings). Set a **default host** in Settings (⌘,) and you can leave the
-  host out: `mdv :/path/to/file.md`.
-
-The browser remembers your last host and the last folder on each host. Rename
-and delete are left to the terminal on purpose.
-
-### 5. Share it with people who can't open it
-
-**Publish…** (⇧⌘P) turns the document into a link and copies it.
-Republishing updates the same link, and documents it links to can be published
-along with it, so the links in the shared copy work too.
-
-- **Secret GitHub Gist:** anyone with the link can read it. With several `gh`
-  accounts, pick which one owns it.
-- **GitHub Pages:** hosts the page on your own GitHub Pages, as a plain
-  public page or, with **Require a password**, encrypted in the app so readers
-  type the password once per device. A strong password is generated for you
-  and kept in your Keychain. Pages you pick are listed on your index page,
-  `<you>.github.io/md-viewer-pages/`, protected ones with a lock. Nothing to
-  set up: the first publish creates the repo for you.
-- **Published pages read well:** they follow the reader's light or dark mode
-  (with a toggle in the corner), highlight code, and have an outline at the
-  side that jumps to any heading.
-- **Keep in sync with GitHub:** for a document opened from GitHub, the
-  published copy follows the repo while OpenMD is open, whoever pushes.
-- **Anywhere else:** **Edit targets…** adds places through a command or a
-  local MCP server, starting from examples (your web server, cloud storage, a
-  notes service). New commands need your OK in a native dialog.
-- **Keep track:** **Published Documents…** (⌘P, or the button next to Publish
-  in the title bar) lists everything you've published, newest first; paste a
-  link to find the file behind it, or copy a protected page's password.
-  **Update an existing page instead…** links a document to a page you
-  published from another Mac, and **Unpublish** deletes a gist or protected
-  page when you're done.
-- **Export as HTML** (⇧⌘E) saves the rendered page as a file.
-
-![Publishing a document: pick a target, and the link is copied](docs/publish.png)
-
-![Publishing a password-protected page: generated password, kept in sync with GitHub](docs/protected-page.png)
-
-![What readers see: a password prompt that can remember this device](docs/protected-reader.png)
-
-![Edit targets: start from an example](docs/publish-targets.png)
-
-Details, the config format and the security model:
-[docs/PUBLISHING.md](docs/PUBLISHING.md).
+These apps are great editors; OpenMD is built for the files agents write on
+other machines, and for getting them in front of people.
 
 ## Keyboard shortcuts
 

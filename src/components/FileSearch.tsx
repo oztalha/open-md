@@ -127,7 +127,7 @@ export function FileSearch({ children }: { children: ReactNode }) {
       const path = spec.kind === "remote" ? spec.ref.path : spec.path;
       const key = host ?? "";
       const group = groups.get(key) ?? { host, files: [] };
-      group.files.push({ path, order: 1000 + i, label: entry.label || basename(path) });
+      group.files.push({ path, order: 1000 + i, label: basename(path) });
       groups.set(key, group);
     });
     setPending(groups.size);

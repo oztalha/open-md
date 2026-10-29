@@ -5,6 +5,13 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Fixed
+- Search in Files: a match far into a long line could be cut off in the
+  narrow sidebar; snippets now start just before the match. Recent remote
+  files no longer show their host twice in the result list.
+- The very first publish on a Mac counted each page twice in Published
+  Documents ("updated 1×").
+
 ## [0.21.0] — 2026-10-29
 
 ### Added

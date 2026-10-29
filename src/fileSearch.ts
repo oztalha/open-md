@@ -43,14 +43,15 @@ export function searchText(text: string, re: RegExp): LineHit[] {
 }
 
 /**
- * A line cut to fit, around its first match, as plain and matched parts for
+ * A line cut to fit, starting a little before its first match (the sidebar
+ * is narrow, so the match must come early), as plain and matched parts for
  * highlighting.
  */
-export function snippet(text: string, re: RegExp, width = 120): { text: string; match: boolean }[] {
+export function snippet(text: string, re: RegExp, width = 120, lead = 16): { text: string; match: boolean }[] {
   re.lastIndex = 0;
   const first = re.exec(text);
   let start = 0;
-  if (first && first.index > width / 3) start = first.index - Math.floor(width / 3);
+  if (first && first.index > lead) start = first.index - lead;
   let view = text.slice(start, start + width).replace(/\t/g, " ");
   if (start > 0) view = "…" + view.trimStart();
   const parts: { text: string; match: boolean }[] = [];
