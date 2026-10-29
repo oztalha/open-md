@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { useStore } from "../store";
 import { startSortDrag } from "../dragSort";
 import { basename, displayTitle, isDirty } from "../types";
@@ -21,6 +21,8 @@ import { useModHeld } from "../keybindings/useModHeld";
 import { formatKeybind, keybindFor, useSettings } from "../settings";
 
 /** Name + a dim hint of where it lives: the host, or "local". */
+const OPEN_HEIGHT_KEY = "sidebarOpenHeight";
+
 function describeRecent(entry: RecentEntry): {
   name: string;
   hint: string;
@@ -111,6 +113,42 @@ export function Sidebar() {
   const width = useStore((s) => s.sidebarWidth);
   const tab = useStore((s) => s.sidebarTab);
 
+  // The Open list's height: dragged with the handle under it, remembered;
+  // null = as tall as its files, up to 60% of the sidebar (see CSS).
+  const [openHeight, setOpenHeight] = useState<number | null>(() => {
+    const saved = Number(localStorage.getItem(OPEN_HEIGHT_KEY));
+    return saved > 0 ? saved : null;
+  });
+  const openList = useRef<HTMLElement | null>(null);
+  const startSplit = (event: React.PointerEvent) => {
+    event.preventDefault();
+    const list = openList.current;
+    const aside = list?.closest("aside");
+    if (!list || !aside) return;
+    const startY = event.clientY;
+    const startHeight = list.getBoundingClientRect().height;
+    // Leave room for at least a few recent files below.
+    const max = aside.getBoundingClientRect().height - 160;
+    let latest = startHeight;
+    document.body.classList.add("resizing-y");
+    const move = (ev: PointerEvent) => {
+      latest = Math.round(Math.max(40, Math.min(max, startHeight + ev.clientY - startY)));
+      setOpenHeight(latest);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.classList.remove("resizing-y");
+      localStorage.setItem(OPEN_HEIGHT_KEY, String(latest));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const resetSplit = () => {
+    setOpenHeight(null);
+    localStorage.removeItem(OPEN_HEIGHT_KEY);
+  };
+
   // Drag the right edge to resize; width is clamped + persisted in the store.
   const startResize = (event: React.PointerEvent) => {
     event.preventDefault();
@@ -169,7 +207,11 @@ export function Sidebar() {
       ) : (
         <>
           <div className="sidebar-header">Open</div>
-          <nav className="sidebar-list">
+          <nav
+            ref={openList}
+            className="sidebar-list sidebar-open-list"
+            style={openHeight != null ? { height: openHeight, maxHeight: "none" } : undefined}
+          >
             {tabs.map((docId) => {
               const doc = docs[docId];
               if (!doc) return null;
@@ -225,9 +267,18 @@ export function Sidebar() {
               );
             })}
           </nav>
+          {(pinList.length > 0 || recentList.length > 0) && (
+            <div
+              className="sidebar-split"
+              role="separator"
+              aria-orientation="horizontal"
+              data-tip="Drag to resize · double-click to reset"
+              onPointerDown={startSplit}
+              onDoubleClick={resetSplit}
+            />
+          )}
           {pinList.length > 0 && (
             <>
-              <div className="sidebar-divider" />
               <div className="sidebar-header">Pinned</div>
               <nav className="sidebar-list sidebar-pins">
                 {pinList.map((entry) => {
@@ -275,7 +326,7 @@ export function Sidebar() {
           )}
           {recentList.length > 0 && (
             <>
-              <div className="sidebar-divider" />
+              {pinList.length > 0 && <div className="sidebar-divider" />}
               <div className="sidebar-header sidebar-header-row">
                 <span>Recent</span>
                 <button

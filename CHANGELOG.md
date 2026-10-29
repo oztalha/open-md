@@ -5,6 +5,12 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Fixed
+- In the sidebar, a long **Recent** list squeezed **Open** down to a couple
+  of rows. Open files now keep their room (up to 60% of the sidebar), and the
+  line between the two lists is a handle: drag it to resize, double-click to
+  reset.
+
 ## [0.20.4] — 2026-10-27
 
 ### Changed

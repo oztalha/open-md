@@ -2898,6 +2898,33 @@ html.no-caret-animation .editor .cm-cursor {
 .sidebar-recent {
   flex: 1 1 auto;
 }
+/* Open files keep their room (up to 60% of the sidebar) instead of being
+   squeezed by a long Recent list; the handle below sets an exact height. */
+.sidebar-open-list {
+  flex: 0 0 auto;
+  max-height: 60%;
+}
+.sidebar-split {
+  flex: none;
+  position: relative;
+  height: 13px;
+  cursor: row-resize;
+}
+.sidebar-split::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 6px;
+  height: 1px;
+  background: var(--border);
+}
+.sidebar-split:hover::before {
+  height: 3px;
+  top: 5px;
+  border-radius: 2px;
+  background: var(--accent);
+}
 .sidebar-divider {
   flex: none;
   height: 1px;
