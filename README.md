@@ -12,6 +12,21 @@ link stays the same every time you update it.
 
 ![An agent's report on a remote machine, open in OpenMD: editor and rendered preview side by side](docs/remote-report.png)
 
+## How it compares
+
+| | OpenMD | Typora, iA Writer, MacDown | Obsidian | VS Code preview |
+| --- | :---: | :---: | :---: | :---: |
+| Open files on a remote machine over `ssh` | ✅ nothing to install | ❌ | ❌ | with a remote server installed on the host |
+| Open files straight from a GitHub repo | ✅ | ❌ | ❌ | with an extension |
+| Reloads while an agent rewrites the file | ✅ | some | ✅ | ✅ |
+| One search across local and remote files | ✅ | ❌ | its vault only | its workspace only |
+| Publish to a link, linked documents and images included | ✅ | export to a file | with paid Obsidian Publish | ❌ |
+| Password-protected pages, encrypted in the app | ✅ | ❌ | ❌ | ❌ |
+| Same link on every update; find the file behind any link | ✅ | ❌ | with Publish | ❌ |
+
+These apps are great editors; OpenMD is built for the files agents write on
+other machines, and for getting them in front of people.
+
 ## Install (Apple Silicon)
 
 **[Download the latest DMG](https://github.com/oztalha/open-md/releases/latest/download/OpenMD_aarch64.dmg)**
@@ -127,21 +142,6 @@ Details, the config format and the security model:
 ![LaTeX math rendered with KaTeX](docs/math.png)
 
 ![A Python file on a remote machine, highlighted with line numbers](docs/code.png)
-
-## How it compares
-
-| | OpenMD | Typora, iA Writer, MacDown | Obsidian | VS Code preview |
-| --- | :---: | :---: | :---: | :---: |
-| Open files on a remote machine over `ssh` | ✅ nothing to install | ❌ | ❌ | with a remote server installed on the host |
-| Open files straight from a GitHub repo | ✅ | ❌ | ❌ | with an extension |
-| Reloads while an agent rewrites the file | ✅ | some | ✅ | ✅ |
-| One search across local and remote files | ✅ | ❌ | its vault only | its workspace only |
-| Publish to a link, linked documents and images included | ✅ | export to a file | with paid Obsidian Publish | ❌ |
-| Password-protected pages, encrypted in the app | ✅ | ❌ | ❌ | ❌ |
-| Same link on every update; find the file behind any link | ✅ | ❌ | with Publish | ❌ |
-
-These apps are great editors; OpenMD is built for the files agents write on
-other machines, and for getting them in front of people.
 
 ## Keyboard shortcuts
 
