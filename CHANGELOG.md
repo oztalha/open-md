@@ -5,6 +5,10 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Changed
+- Search in Files: Esc closes the search even when the search box isn't
+  focused (unless a dialog, the editor or another field takes it).
+
 ## [0.21.1] — 2026-10-29
 
 ### Fixed

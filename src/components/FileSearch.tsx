@@ -68,6 +68,23 @@ export function FileSearch({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("mdv-file-search-close", close);
   }, []);
 
+  // Esc closes the search from anywhere, unless something else takes it: a
+  // dialog (they stop it in the capture phase), the editor (its search panel,
+  // selection), another text field, or the lightbox and settings panel.
+  useEffect(() => {
+    if (!query) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const focused = document.activeElement;
+      if ((focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) && focused !== input.current) return;
+      if (document.querySelector(".lightbox, .settings-panel")) return;
+      setQuery("");
+      input.current?.blur();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [query]);
+
   const re = matcher(query, opts);
   const invalid = !!query && !re;
 
