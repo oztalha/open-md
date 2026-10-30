@@ -5,6 +5,8 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.21.2] — 2026-10-30
+
 ### Changed
 - Search in Files: Esc closes the search even when the search box isn't
   focused (unless a dialog, the editor or another field takes it).
@@ -673,6 +675,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.21.2]: https://github.com/oztalha/open-md/releases/tag/v0.21.2
 [0.21.1]: https://github.com/oztalha/open-md/releases/tag/v0.21.1
 [0.21.0]: https://github.com/oztalha/open-md/releases/tag/v0.21.0
 [0.20.5]: https://github.com/oztalha/open-md/releases/tag/v0.20.5
