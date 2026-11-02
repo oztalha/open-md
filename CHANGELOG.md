@@ -5,6 +5,10 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Added
+- Remote browser: right-click in a folder for New File… and New Folder…. New File
+  asks for a name (untitled.md), creates the empty file and opens it in the editor.
+
 ## [0.21.2] — 2026-10-30
 
 ### Changed

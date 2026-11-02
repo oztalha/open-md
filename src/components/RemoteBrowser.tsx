@@ -10,9 +10,11 @@ import {
   listRemoteDir,
   makeRemoteDir,
   pickDownloadPath,
+  remoteStat,
   uploadRemote,
+  writeRemoteFile,
 } from "../ipc";
-import { Menu, MenuItem } from "@tauri-apps/api/menu";
+import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { CopyButton } from "./CopyButton";
 import type { RemoteListing } from "../ipc";
@@ -168,12 +170,19 @@ function Browser({ mode }: { mode: "open" | "save" }) {
     void load(initial.host, initial.dir);
   }, [load, initial]);
 
-  // Escape closes (capture phase, so it beats other window-level handlers).
+  // "New File…" / "New Folder…": the name being typed for it.
+  const [naming, setNaming] = useState<{ kind: "file" | "folder"; draft: string } | null>(null);
+  const namingRef = useRef(naming);
+  namingRef.current = naming;
+
+  // Escape closes (capture phase, so it beats other window-level handlers);
+  // while a new file or folder is being named, it only cancels that.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.stopPropagation();
-      useStore.getState().setRemoteBrowser(null);
+      if (namingRef.current) setNaming(null);
+      else useStore.getState().setRemoteBrowser(null);
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
@@ -242,15 +251,78 @@ function Browser({ mode }: { mode: "open" | "save" }) {
     }
   };
 
+  // New File… / New Folder… in the folder shown (not on GitHub: read-only).
+  const createItems = () =>
+    listing && !isGithubHost(host)
+      ? [
+          ...(mode === "open"
+            ? [MenuItem.new({ text: "New File…", action: () => setNaming({ kind: "file", draft: "untitled.md" }) })]
+            : []),
+          MenuItem.new({ text: "New Folder…", action: () => setNaming({ kind: "folder", draft: "untitled folder" }) }),
+        ]
+      : [];
+
   const showEntryMenu = async (path: string, isDir: boolean) => {
+    const create = createItems();
     const items = await Promise.all([
       ...(isDir
         ? [MenuItem.new({ text: "Open Folder", action: () => void load(host, path) })]
         : [MenuItem.new({ text: "Open", action: () => openFile(host, path) })]),
       MenuItem.new({ text: "Download…", action: () => void download(path) }),
       MenuItem.new({ text: "Copy Path", action: () => void copyToClipboard(copyWithHost ? `${host}:${path}` : path) }),
+      ...(create.length ? [PredefinedMenuItem.new({ item: "Separator" }), ...create] : []),
     ]);
     await (await Menu.new({ items })).popup();
+  };
+
+  // Right-click on the list's empty space: the folder's own menu.
+  const showFolderMenu = async () => {
+    const create = createItems();
+    if (!create.length) return;
+    await (await Menu.new({ items: await Promise.all(create) })).popup();
+  };
+
+  // Create the named file (empty, then open it to edit) or folder (then show it).
+  const createNamed = async () => {
+    const dir = listing?.dir;
+    const name = naming?.draft.trim().replace(/\/+$/, "");
+    if (!naming || !dir || !name) return;
+    if (name.startsWith("/") || name.startsWith("~") || name.split("/").includes("..")) {
+      setError("Type a name inside this folder (subfolders like notes/today.md are fine).");
+      return;
+    }
+    const target = joinPath(dir, name);
+    setError(null);
+    try {
+      await remoteStat(host, target);
+      setError(`${name} already exists here.`);
+      return;
+    } catch (err) {
+      if (!/no such file/i.test(String(err))) {
+        setError(String(err));
+        return;
+      }
+    }
+    try {
+      if (naming.kind === "folder") {
+        await makeRemoteDir(host, target);
+        setNaming(null);
+        void load(host, target);
+        return;
+      }
+      if (name.includes("/")) await makeRemoteDir(host, parentOf(target));
+      await writeRemoteFile(host, target, "");
+    } catch (err) {
+      setError(String(err));
+      return;
+    }
+    const h = host;
+    close();
+    const s = useStore.getState();
+    await s.openRemote(h, target);
+    // A new file is for writing: show the editor, not just an empty preview.
+    const doc = Object.values(useStore.getState().docs).find((d) => d.remote?.host === h && d.remote.path === target);
+    if (doc && useStore.getState().views[doc.id]?.mode === "preview") s.setMode(doc.id, "editor");
   };
 
   const openFile = (h: string, path: string) => {
@@ -506,7 +578,46 @@ function Browser({ mode }: { mode: "open" | "save" }) {
           </nav>
         )}
 
-        <div className="rb-list" aria-busy={loading}>
+        {naming && (
+          <div className="rb-location">
+            <span className="rb-save-label">{naming.kind === "file" ? "New file" : "New folder"}</span>
+            <input
+              className="remote-prompt-input rb-path"
+              value={naming.draft}
+              spellCheck={false}
+              autoCapitalize="off"
+              autoCorrect="off"
+              autoFocus
+              // Select the name without its extension, like Finder.
+              onFocus={(event) => {
+                const dot = naming.kind === "file" ? event.currentTarget.value.lastIndexOf(".") : -1;
+                event.currentTarget.setSelectionRange(0, dot > 0 ? dot : event.currentTarget.value.length);
+              }}
+              onChange={(event) => setNaming({ ...naming, draft: event.target.value })}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void createNamed();
+                }
+              }}
+            />
+            <button className="rb-github-btn" onClick={() => void createNamed()} disabled={!naming.draft.trim()}>
+              Create
+            </button>
+            <button className="rb-github-btn" onClick={() => setNaming(null)}>
+              Cancel
+            </button>
+          </div>
+        )}
+
+        <div
+          className="rb-list"
+          aria-busy={loading}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            void showFolderMenu();
+          }}
+        >
           {error ? (
             <div className="rb-status rb-error">{error}</div>
           ) : missing ? (
@@ -551,6 +662,7 @@ function Browser({ mode }: { mode: "open" | "save" }) {
                     }}
                     onContextMenu={(e) => {
                       e.preventDefault();
+                      e.stopPropagation();
                       void showEntryMenu(joinPath(listing.dir, entry.name), entry.isDir);
                     }}
                     onClick={() => {
