@@ -5,6 +5,8 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.21.4] — 2026-11-02
+
 ### Added
 - File → Import from Link… (⇧⌘I): paste a published page's link and get it as
   a new markdown document, saved on this Mac or a remote host. Linked (the
@@ -687,6 +689,8 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.21.4]: https://github.com/oztalha/open-md/releases/tag/v0.21.4
+[0.21.4]: https://github.com/oztalha/open-md/releases/tag/v0.21.4
 [0.21.3]: https://github.com/oztalha/open-md/releases/tag/v0.21.3
 [0.21.2]: https://github.com/oztalha/open-md/releases/tag/v0.21.2
 [0.21.1]: https://github.com/oztalha/open-md/releases/tag/v0.21.1
