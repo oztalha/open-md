@@ -48,6 +48,7 @@ export const KEYBINDS: KeybindDef[] = [
   { id: "task-toggle", label: "Toggle task checkbox", kind: "editor", defaultKey: "Mod-Enter" },
   { id: "new", label: "New file", kind: "menu", defaultKey: "CmdOrCtrl+N" },
   { id: "open", label: "Open…", kind: "menu", defaultKey: "CmdOrCtrl+O" },
+  { id: "import-link", label: "Import from link…", kind: "menu", defaultKey: "Shift+CmdOrCtrl+I" },
   { id: "save", label: "Save", kind: "menu", defaultKey: "CmdOrCtrl+S" },
   { id: "save-as", label: "Save as…", kind: "menu", defaultKey: "Alt+CmdOrCtrl+S" },
   { id: "save-remote", label: "Save to remote…", kind: "menu", defaultKey: "Shift+CmdOrCtrl+S" },

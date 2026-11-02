@@ -222,6 +222,8 @@ export interface PublishTarget {
   format?: "markdown" | "html";
   /** The target has an `images` command that uploads a document's images. */
   uploadsImages?: boolean;
+  /** Fetches a page as markdown (File → Import from Link…); a step saves `markdown`. */
+  import?: PublishStep[];
 }
 
 /** Upload one local image with a target's `images` command; returns its link. */
@@ -265,14 +267,15 @@ export function mcpClose(session: number): Promise<void> {
   return invoke<void>("publish_mcp_close", { session });
 }
 
-/** Run step `index` of a target's create/update list, which is a shell command. */
+/** Run step `index` of a target's create/update (or import) list, which is a shell command. */
 export function publishStepCommand(
   targetId: string,
   update: boolean,
   index: number,
   vars: Record<string, string>,
+  list?: "import",
 ): Promise<unknown> {
-  return invoke<unknown>("publish_step_command", { targetId, update, index, vars });
+  return invoke<unknown>("publish_step_command", { targetId, update, index, vars, list: list ?? null });
 }
 
 export interface McpResult {

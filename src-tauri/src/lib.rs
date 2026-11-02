@@ -758,6 +758,11 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
                 .build(app)?,
         )
         .item(
+            &MenuItemBuilder::with_id("import-link", "Import from Link…")
+                .accelerator("Shift+CmdOrCtrl+I")
+                .build(app)?,
+        )
+        .item(
             &SubmenuBuilder::with_id(app, "recent-menu", "Open Recent")
                 .item(
                     &MenuItemBuilder::with_id("recent-empty", "No Recent Files")

@@ -68,6 +68,10 @@ pub struct Target {
     create: Vec<Step>,
     #[serde(default)]
     update: Vec<Step>,
+    /// Fetches a page as markdown (vars `id`, `url`; a step saves `markdown`),
+    /// for File → Import from Link….
+    #[serde(default, rename = "import", skip_serializing_if = "Vec::is_empty")]
+    import_steps: Vec<Step>,
     #[serde(default, rename = "urlTemplate", skip_serializing_if = "Option::is_none")]
     url_template: Option<String>,
     #[serde(default)]
@@ -123,6 +127,7 @@ fn builtin(id: &str, label: &str, kind: &str) -> Target {
         command: None,
         create: vec![],
         update: vec![],
+        import_steps: vec![],
         url_template: None,
         public: false,
         format: None,
@@ -161,7 +166,7 @@ fn load_config() -> Result<Config, String> {
             for t in &mut config.targets {
                 t.kind = Some(t.kind().to_string());
                 relabel_legacy(t);
-                for s in t.create.iter_mut().chain(t.update.iter_mut()) {
+                for s in t.create.iter_mut().chain(t.update.iter_mut()).chain(t.import_steps.iter_mut()) {
                     s.run = s.command.is_some();
                 }
                 t.uploads_images = t.images.is_some();
@@ -243,7 +248,7 @@ fn executables(config: &Config) -> std::collections::BTreeSet<String> {
         if let Some(command) = &target.command {
             out.insert(format!("Target \"{}\": {command}", target.id));
         }
-        for step in target.create.iter().chain(target.update.iter()) {
+        for step in target.create.iter().chain(target.update.iter()).chain(target.import_steps.iter()) {
             if let Some(command) = &step.command {
                 out.insert(format!("Target \"{}\" step: {command}", target.id));
             }
@@ -571,6 +576,7 @@ pub async fn publish_mcp_open(
         .create
         .iter()
         .chain(&target.update)
+        .chain(&target.import_steps)
         .filter(|s| s.command.is_none())
         .map(|s| s.tool.clone())
         .collect();
@@ -789,9 +795,14 @@ pub async fn publish_step_command(
     update: bool,
     index: usize,
     vars: HashMap<String, String>,
+    list: Option<String>,
 ) -> Result<Value, String> {
     let target = find_target(&load_config()?, &target_id)?;
-    let steps = if update { &target.update } else { &target.create };
+    let steps = match list.as_deref() {
+        Some("import") => &target.import_steps,
+        _ if update => &target.update,
+        _ => &target.create,
+    };
     let command = steps
         .get(index)
         .and_then(|s| s.command.clone())

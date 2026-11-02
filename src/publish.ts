@@ -377,17 +377,17 @@ function pick(data: unknown, path: string): unknown {
 
 async function runSteps(
   target: PublishTarget,
-  update: boolean,
+  update: boolean | "import",
   vars: Record<string, string>,
 ): Promise<void> {
-  const steps: PublishStep[] = update ? target.update : target.create;
+  const steps: PublishStep[] = update === "import" ? (target.import ?? []) : update ? target.update : target.create;
   // Started on the first tool step, so command-only lists don't spawn a server.
   let session: number | undefined;
   try {
     for (const [index, step] of steps.entries()) {
       let data: unknown;
       if (step.run) {
-        data = await publishStepCommand(target.id, update, index, vars);
+        data = await publishStepCommand(target.id, update === true, index, vars, update === "import" ? "import" : undefined);
       } else {
         session ??= await mcpOpen(target.id);
         const result = await mcpCall(session, step.tool, fill(step.args ?? {}, vars));
@@ -441,6 +441,73 @@ export function linkExistingPage(doc: Doc, target: PublishTarget, link: string):
   saveRecord(doc, target.id, record);
   useStore.getState().bumpPublished();
   return record;
+}
+
+/** Targets that can fetch a page back as markdown (an `import` list). */
+export function importTargets(targets: PublishTarget[]): PublishTarget[] {
+  return targets.filter((t) => (t.import?.length ?? 0) > 0);
+}
+
+export interface ImportedPage {
+  target: PublishTarget;
+  id: string;
+  url: string;
+  markdown: string;
+}
+
+/**
+ * File → Import from Link…: fetch a published page (e.g. a doc first written
+ * elsewhere) as markdown, with the first target whose links it fits.
+ */
+export async function importFromLink(targets: PublishTarget[], link: string): Promise<ImportedPage> {
+  const candidates = importTargets(targets);
+  for (const target of candidates) {
+    const id = idFromLink(link, target);
+    if (!id) continue;
+    const url = String(fill(target.urlTemplate ?? "", { id })) || link.trim();
+    const vars: Record<string, string> = { id, url };
+    await runSteps(target, "import", vars);
+    if (vars.markdown == null) throw new Error(`${target.label}: the import steps didn't save "markdown"`);
+    return { target, id, url, markdown: vars.markdown };
+  }
+  throw new Error(
+    candidates.length
+      ? `That isn't a link to ${candidates.map((t) => t.label).join(" or ")}.`
+      : 'No publish target can import yet: add an "import" list to one in publish.json.',
+  );
+}
+
+// Imported documents waiting to be saved, so they can be linked to their page:
+// records are kept by file, and a new document has none until it's saved.
+const pendingLinks = new Map<string, { target: PublishTarget; url: string }>();
+
+/** Link `doc` to the page it was imported from as soon as it's saved somewhere. */
+export function linkWhenSaved(docId: string, target: PublishTarget, url: string): void {
+  pendingLinks.set(docId, { target, url });
+  applyPendingLinks();
+}
+
+function applyPendingLinks(): void {
+  const docs = useStore.getState().docs;
+  for (const [docId, { target, url }] of pendingLinks) {
+    const doc = docs[docId];
+    if (!doc) pendingLinks.delete(docId);
+    else if (doc.path || doc.remote) {
+      pendingLinks.delete(docId);
+      linkExistingPage(doc, target, url);
+    }
+  }
+}
+
+/** Whether `doc` was imported and isn't linked to its page yet (not saved). */
+export function awaitingLink(doc: Doc | undefined): boolean {
+  return !!doc && pendingLinks.has(doc.id);
+}
+
+export function initImportLinks(): void {
+  useStore.subscribe((s, prev) => {
+    if (pendingLinks.size && s.docs !== prev.docs) applyPendingLinks();
+  });
 }
 
 /** The text to publish: the live editor (unsaved edits included), else the doc. */
@@ -885,6 +952,8 @@ export async function publishDoc(
     onProgress?: (text: string) => void;
   } = {},
 ): Promise<PublishOutcome> {
+  // Published as new, it would make a second page instead of updating its own.
+  if (awaitingLink(doc)) throw new Error("Save this document first, so Publish updates the page it was imported from.");
   let markdown = liveMarkdown(doc);
   const skipped: string[] = [];
   imageWarnings = [];

@@ -13,7 +13,7 @@ import { useStore } from "./store";
 import { displayTitle } from "./types";
 import { getEditorView } from "./editor/registry";
 import { REPO_URL } from "./links";
-import { initGithubSync, latestPublished } from "./publish";
+import { initGithubSync, initImportLinks, latestPublished } from "./publish";
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif|heic|heif|bmp|tiff?)$/i;
 
@@ -166,6 +166,9 @@ function handleMenu(id: string) {
       break;
     case "open-remote":
       s.setRemoteBrowser("open");
+      break;
+    case "import-link":
+      s.setImportOpen(true);
       break;
     case "save-remote":
       s.setRemoteBrowser("save");
@@ -396,6 +399,7 @@ export function initApp(): void {
     initRecents();
     initAutoReload();
     initGithubSync();
+    initImportLinks();
   });
 
   // Native window title follows the active document.

@@ -180,6 +180,21 @@ page is created first and then updated with the uploaded images, so the
 target needs `update` steps. Images that fail keep their local path, and the
 dialog lists them.
 
+**Importing a page:** add an `"import"` list to a server target, and
+*File → Import from Link…* can fetch one of its pages as markdown (a doc you
+first wrote in the browser, say). Paste the page's link; its id is read from
+the link with `urlTemplate`, and the steps run with `{id}` and `{url}`. One
+step must save `markdown`, the page's text. The page opens as a new document,
+and you save it on this Mac or on a remote host. Linked (the default), the
+next Publish updates that page with your markdown instead of making a new one.
+For example:
+
+```json
+"import": [
+  { "tool": "get_page_markdown", "args": { "id": "{id}" }, "save": { "markdown": "markdown" } }
+]
+```
+
 Add `"format": "html"` to any target to publish the rendered HTML (like
 Export as HTML) instead of the markdown.
 

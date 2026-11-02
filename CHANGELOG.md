@@ -5,6 +5,12 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Added
+- File → Import from Link… (⇧⌘I): paste a published page's link and get it as
+  a new markdown document, saved on this Mac or a remote host. Linked (the
+  default), the next Publish updates that page instead of making a new one.
+  Works with any publish target that has an `import` list (docs/PUBLISHING.md).
+
 ## [0.21.3] — 2026-11-02
 
 ### Added

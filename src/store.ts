@@ -95,6 +95,8 @@ interface AppState {
   remoteDrop: string[] | null;
   /** Whether the About window is showing. */
   aboutOpen: boolean;
+  /** File → Import from Link… is open. */
+  importOpen: boolean;
   /** Whether the Publish dialog is showing. */
   publishOpen: boolean;
   /** Whether the Published Documents window is showing. */
@@ -136,6 +138,7 @@ interface AppState {
   setLightbox(src: string | null): void;
   setRemoteBrowser(mode: "open" | "save" | null): void;
   setAboutOpen(open: boolean): void;
+  setImportOpen(open: boolean): void;
   setRemoteDrop(paths: string[] | null): void;
   setPublishOpen(open: boolean): void;
   setPublishedOpen(open: boolean): void;
@@ -163,6 +166,8 @@ interface AppState {
   toggleOutline(): void;
   setRatio(docId: string, ratio: number): void;
   newDoc(): void;
+  /** A new, unsaved document with this text (e.g. an imported page); returns its id. */
+  newDocWith(title: string, content: string): string;
 
   // --- file operations -----------------------------------------------------
   placeDoc(doc: Doc, mode: ViewMode): void;
@@ -226,6 +231,7 @@ export const useStore = create<AppState>()((set, get) => ({
   lightboxSrc: null,
   remoteBrowser: null,
   aboutOpen: false,
+  importOpen: false,
   remoteDrop: null,
   publishOpen: false,
   publishedOpen: false,
@@ -353,6 +359,10 @@ export const useStore = create<AppState>()((set, get) => ({
     if (get().aboutOpen !== open) set({ aboutOpen: open });
   },
 
+  setImportOpen(open) {
+    if (get().importOpen !== open) set({ importOpen: open });
+  },
+
   setRemoteBrowser(mode) {
     if (!mode) remoteBrowserStart = null;
     if (get().remoteBrowser !== mode) set({ remoteBrowser: mode });
@@ -471,6 +481,12 @@ export const useStore = create<AppState>()((set, get) => ({
       tabs: [...s.tabs, doc.id],
       activeId: doc.id,
     });
+  },
+
+  newDocWith(title, content) {
+    const doc = makeDoc({ title, content });
+    get().placeDoc(doc, useSettings.getState().settings.defaultMode);
+    return doc.id;
   },
 
   placeDoc(doc, mode) {

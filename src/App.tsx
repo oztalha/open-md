@@ -9,6 +9,7 @@ import { AboutDialog } from "./components/AboutDialog";
 import { PublishDialog } from "./components/PublishDialog";
 import { TargetsEditor } from "./components/TargetsEditor";
 import { PublishedDialog } from "./components/PublishedDialog";
+import { ImportDialog } from "./components/ImportDialog";
 import { PublishProgress } from "./components/PublishProgress";
 import { AnnotationLayer } from "./components/AnnotationLayer";
 
@@ -49,6 +50,7 @@ export default function App() {
       <PublishDialog />
       <TargetsEditor />
       <PublishedDialog />
+      <ImportDialog />
       <PublishProgress />
       <AnnotationLayer />
     </div>
