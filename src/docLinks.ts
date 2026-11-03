@@ -165,6 +165,18 @@ export function rewriteLinks(markdown: string, urls: Map<string, string>): strin
   });
 }
 
+/**
+ * The reverse of `rewriteLinks`, for a page pulled back from where it was
+ * published: links to published pages point at the local files again. A
+ * `[path](url)` that publishing made from a bare `path` goes back to `path`.
+ */
+export function restoreLinks(markdown: string, local: (url: string) => string | null): string {
+  const unbared = markdown.replace(/(?<!!)\[([^[\]\n]+)\]\((https?:\/\/[^\s()<>]+)\)/g, (whole, text: string, url: string) =>
+    local(url) === text ? text : whole,
+  );
+  return replaceSpans(unbared, linkSpans(unbared).filter((s) => !s.image), (s) => local(s.href) ?? undefined);
+}
+
 function replaceSpans(markdown: string, spans: LinkSpan[], to: (s: LinkSpan) => string | undefined): string {
   let out = "";
   let last = 0;

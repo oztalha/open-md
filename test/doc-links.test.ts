@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { localDocLinks, resolveLink, rewriteLinks } from "../src/docLinks";
+import { localDocLinks, resolveLink, restoreLinks, rewriteLinks } from "../src/docLinks";
 
 // Publishing with linked documents rewrites links in place, so the scanner
 // must find exactly the local .md links, and leave code and everything else.
@@ -67,5 +67,26 @@ describe("local images", () => {
     expect(out).toContain('<img src="https://u/2" alt="c">');
     expect(out).toContain("[doc](notes.md)");
     expect(out).toContain("`![code](img/x.png)`");
+  });
+});
+
+describe("restoreLinks", () => {
+  const local = (url: string) =>
+    ({ "https://notes.example.com/doc/A": "hackathon-idea.md", "https://notes.example.com/doc/B": "../specs/b.md" })[url] ??
+    null;
+
+  test("published links point at the local files again", () => {
+    const md = "See [the idea](https://notes.example.com/doc/A) and [B](https://notes.example.com/doc/B).";
+    expect(restoreLinks(md, local)).toBe("See [the idea](hackathon-idea.md) and [B](../specs/b.md).");
+  });
+
+  test("a link publishing made from a bare path goes back to the bare path", () => {
+    const md = "Inputs: [hackathon-idea.md](https://notes.example.com/doc/A), done.";
+    expect(restoreLinks(md, local)).toBe("Inputs: hackathon-idea.md, done.");
+  });
+
+  test("other links and images stay", () => {
+    const md = "[x](https://other.example.com/) ![img](https://notes.example.com/doc/A)";
+    expect(restoreLinks(md, local)).toBe(md);
   });
 });

@@ -7,9 +7,11 @@ import {
   importFromLink,
   importTargets,
   linkWhenSaved,
+  localLinksFor,
   pageForLink,
   replaceDocText,
 } from "../publish";
+import { restoreLinks } from "../docLinks";
 import { firstH1 } from "../pageIndex";
 import { keyForDoc } from "../annotations";
 import { basename } from "../types";
@@ -44,12 +46,8 @@ function Import() {
   const close = () => useStore.getState().setImportOpen(false);
   const [targets, setTargets] = useState<PublishTarget[] | null>(null);
   const [link, setLink] = useState("");
-  const [keepLinked, setKeepLinked] = useState(
-    () => localStorage.getItem(LINK_KEY) !== "0",
-  );
-  const [where, setWhere] = useState<Where>(() =>
-    localStorage.getItem(WHERE_KEY) === "remote" ? "remote" : "mac",
-  );
+  const [keepLinked, setKeepLinked] = useState(() => localStorage.getItem(LINK_KEY) !== "0");
+  const [where, setWhere] = useState<Where>(() => (localStorage.getItem(WHERE_KEY) === "remote" ? "remote" : "mac"));
   const [busy, setBusy] = useState(false);
   const [asNew, setAsNew] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,18 +87,15 @@ function Import() {
       const s = useStore.getState();
       if (updating && sourceFile) {
         await s.openPaths([sourceFile]);
-        const doc = Object.values(useStore.getState().docs).find(
-          (d) => keyForDoc(d) === sourceFile,
-        );
-        if (!doc || !(await replaceDocText(doc.id, page.markdown)))
-          throw new Error(`Couldn't open ${fileLabel}.`);
+        const doc = Object.values(useStore.getState().docs).find((d) => keyForDoc(d) === sourceFile);
+        if (!doc) throw new Error(`Couldn't open ${fileLabel}.`);
+        // Links to pages published from files here point at those files again.
+        const markdown = restoreLinks(page.markdown, localLinksFor(doc, page.target.id));
+        if (!(await replaceDocText(doc.id, markdown))) throw new Error(`Couldn't open ${fileLabel}.`);
         close();
         return;
       }
-      const docId = s.newDocWith(
-        fileNameFor(page.markdown, page.id),
-        page.markdown,
-      );
+      const docId = s.newDocWith(fileNameFor(page.markdown, page.id), page.markdown);
       if (keepLinked) linkWhenSaved(docId, page.target, page.url);
       close();
       // Saving gives it a place on disk, which is what a link is kept by.
@@ -119,18 +114,14 @@ function Import() {
 
   return (
     <div className="settings-backdrop" onClick={() => !busy && close()}>
-      <div
-        className="remote-prompt publish-dialog"
-        onClick={(event) => event.stopPropagation()}
-      >
+      <div className="remote-prompt publish-dialog" onClick={(event) => event.stopPropagation()}>
         <div className="publish-head">
           <span className="remote-prompt-label">Import from Link</span>
         </div>
 
         {targets && importable.length === 0 ? (
           <p className="rb-status">
-            None of your publish targets can import yet. Add an{" "}
-            <code>import</code> list to one in publish.json (see
+            None of your publish targets can import yet. Add an <code>import</code> list to one in publish.json (see
             docs/PUBLISHING.md).
           </p>
         ) : (
@@ -160,18 +151,12 @@ function Import() {
               <div className="publish-checks">
                 {updating && (
                   <p className="publish-status">
-                    Published from <strong>{fileLabel}</strong>. Import puts the
-                    page's text into that file as unsaved changes: review them,
-                    then ⌘S to keep them or ⌘Z to undo.
+                    Published from <strong>{fileLabel}</strong>. Import puts the page's text into that file as unsaved
+                    changes: review them, then ⌘S to keep them or ⌘Z to undo.
                   </p>
                 )}
                 <label className="publish-asnew">
-                  <input
-                    type="checkbox"
-                    checked={asNew}
-                    disabled={busy}
-                    onChange={(e) => setAsNew(e.target.checked)}
-                  />
+                  <input type="checkbox" checked={asNew} disabled={busy} onChange={(e) => setAsNew(e.target.checked)} />
                   Import as a new file instead
                 </label>
               </div>
@@ -186,30 +171,17 @@ function Import() {
                     disabled={busy}
                     onChange={(event) => {
                       setKeepLinked(event.target.checked);
-                      localStorage.setItem(
-                        LINK_KEY,
-                        event.target.checked ? "1" : "0",
-                      );
+                      localStorage.setItem(LINK_KEY, event.target.checked ? "1" : "0");
                     }}
                   />
                   Publish updates this page
                 </label>
                 <label className="publish-asnew">
-                  <input
-                    type="radio"
-                    checked={where === "mac"}
-                    disabled={busy}
-                    onChange={() => pick("mac")}
-                  />
+                  <input type="radio" checked={where === "mac"} disabled={busy} onChange={() => pick("mac")} />
                   Save on this Mac
                 </label>
                 <label className="publish-asnew">
-                  <input
-                    type="radio"
-                    checked={where === "remote"}
-                    disabled={busy}
-                    onChange={() => pick("remote")}
-                  />
+                  <input type="radio" checked={where === "remote"} disabled={busy} onChange={() => pick("remote")} />
                   Save on a remote host
                 </label>
               </div>
@@ -217,9 +189,8 @@ function Import() {
 
             {keepLinked && !updating && (
               <p className="publish-status">
-                Publishing replaces the whole page with your markdown. What
-                markdown can't hold (comments on text that changed, cell colors,
-                column widths) may be lost.
+                Publishing replaces the whole page with your markdown. What markdown can't hold (comments on text that
+                changed, cell colors, column widths) may be lost.
               </p>
             )}
           </>
@@ -229,11 +200,7 @@ function Import() {
 
         <div className="remote-prompt-actions">
           <span className="rb-where">{busy ? "Importing…" : ""}</span>
-          <button
-            className="remote-prompt-cancel"
-            onClick={close}
-            disabled={busy}
-          >
+          <button className="remote-prompt-cancel" onClick={close} disabled={busy}>
             Cancel
           </button>
           <button

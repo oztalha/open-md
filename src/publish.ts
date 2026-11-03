@@ -468,6 +468,49 @@ export function pageForLink(targets: PublishTarget[], link: string): { target: P
   return null;
 }
 
+/** `to` relative to the folder of `from` (both `/path` or `host:/path`); null across hosts. */
+function relativeKey(from: string, to: string): string | null {
+  const split = (key: string) => {
+    const i = key.indexOf(":/");
+    return i > 0 && !key.startsWith("/") ? [key.slice(0, i), key.slice(i + 1)] : ["", key];
+  };
+  const [fromHost, fromPath] = split(from);
+  const [toHost, toPath] = split(to);
+  if (fromHost !== toHost) return null;
+  const base = fromPath.split("/").slice(0, -1);
+  const target = toPath.split("/");
+  let common = 0;
+  while (common < base.length && common < target.length - 1 && base[common] === target[common]) common++;
+  return [...base.slice(common).map(() => ".."), ...target.slice(common)].join("/");
+}
+
+/**
+ * For a page pulled back into `doc`: the local file a published page's link
+ * stands for. The links `doc` has now give the exact original hrefs; other
+ * pages published from files here (same host) get a relative path.
+ */
+export function localLinksFor(doc: Doc, targetId: string): (url: string) => string | null {
+  const back = new Map<string, string>();
+  const from = keyForDoc(doc);
+  if (from) {
+    for (const [key, byTarget] of Object.entries(loadRecords())) {
+      const url = byTarget[targetId]?.url;
+      const rel = url && relativeKey(from, key);
+      if (url && rel) back.set(url, rel);
+    }
+  }
+  for (const [href, url] of publishedLinks(doc, targetId)) back.set(url, href);
+  return (url) => {
+    if (back.has(url)) return back.get(url)!;
+    // The page's link with a title slug or a #fragment after it.
+    for (const [page, path] of back) {
+      const rest = url.startsWith(page) ? url.slice(page.length) : null;
+      if (rest && /^[/?#]/.test(rest)) return rest.includes("#") ? `${path.split("#")[0]}#${rest.split("#")[1]}` : path;
+    }
+    return null;
+  };
+}
+
 /**
  * Put a page's markdown into the open document as one edit, so it shows as
  * unsaved changes to review (⌘Z takes them back, ⌘S keeps them).

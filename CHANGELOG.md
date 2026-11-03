@@ -5,6 +5,13 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.21.6] — 2026-11-03
+
+### Fixed
+- Import from Link into the file a page was published from: links to other
+  pages published from files here point at those files again (publishing had
+  turned them into the pages' links), and bare `notes.md` mentions stay bare.
+
 ## [0.21.5] — 2026-11-03
 
 ### Changed
@@ -696,6 +703,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.21.6]: https://github.com/oztalha/open-md/releases/tag/v0.21.6
 [0.21.5]: https://github.com/oztalha/open-md/releases/tag/v0.21.5
 [0.21.4]: https://github.com/oztalha/open-md/releases/tag/v0.21.4
 [0.21.4]: https://github.com/oztalha/open-md/releases/tag/v0.21.4
