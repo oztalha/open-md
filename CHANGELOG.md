@@ -5,6 +5,13 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.21.5] — 2026-11-03
+
+### Changed
+- Import from Link: a page you published from a file goes back into that file
+  (as unsaved changes to review; ⌘S keeps them, ⌘Z undoes) instead of
+  making a new one. "Import as a new file instead" is still there.
+
 ## [0.21.4] — 2026-11-02
 
 ### Added
@@ -689,6 +696,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.21.5]: https://github.com/oztalha/open-md/releases/tag/v0.21.5
 [0.21.4]: https://github.com/oztalha/open-md/releases/tag/v0.21.4
 [0.21.4]: https://github.com/oztalha/open-md/releases/tag/v0.21.4
 [0.21.3]: https://github.com/oztalha/open-md/releases/tag/v0.21.3

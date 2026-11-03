@@ -448,6 +448,46 @@ export function importTargets(targets: PublishTarget[]): PublishTarget[] {
   return targets.filter((t) => (t.import?.length ?? 0) > 0);
 }
 
+/**
+ * The file (`/path`, or `host:/path`) a page was published from on this Mac,
+ * if any: importing that page then updates the file instead of making a new one.
+ */
+export function fileForPage(targetId: string, id: string): string | null {
+  for (const [key, byTarget] of Object.entries(loadRecords())) {
+    if (byTarget[targetId]?.id === id) return key;
+  }
+  return null;
+}
+
+/** The import target and page id a link points at, without fetching anything. */
+export function pageForLink(targets: PublishTarget[], link: string): { target: PublishTarget; id: string } | null {
+  for (const target of importTargets(targets)) {
+    const id = idFromLink(link, target);
+    if (id) return { target, id };
+  }
+  return null;
+}
+
+/**
+ * Put a page's markdown into the open document as one edit, so it shows as
+ * unsaved changes to review (⌘Z takes them back, ⌘S keeps them).
+ */
+export async function replaceDocText(docId: string, markdown: string): Promise<boolean> {
+  const s = useStore.getState();
+  if (s.views[docId]?.mode === "preview") s.setMode(docId, "split");
+  for (let i = 0; i < 40; i++) {
+    const view = getEditorView(docId);
+    if (view) {
+      if (view.state.doc.toString() !== markdown) {
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: markdown }, userEvent: "input" });
+      }
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return false;
+}
+
 export interface ImportedPage {
   target: PublishTarget;
   id: string;
