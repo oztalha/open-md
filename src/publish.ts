@@ -6,6 +6,7 @@ import { buildExportHtml, standalonePage } from "./export";
 import { getEditorView } from "./editor/registry";
 import {
   copyToClipboard,
+  ghAccounts,
   gistDelete,
   gistExists,
   mcpCall,
@@ -13,8 +14,10 @@ import {
   pagesBase,
   pagesCommit,
   pagesIndexGet,
+  pagesList,
   pagesPasswordGet,
   pagesPasswordSet,
+  pagesStatus,
   mcpClose,
   mcpOpen,
   publishCommand,
@@ -35,7 +38,7 @@ import { encryptPage, MIN_PASSWORD, newPageId } from "./pageCrypt";
 import { INDEX_CSS, firstH1, parseIndex, renderIndexBody, withEntry, withoutEntry } from "./pageIndex";
 import type { IndexEntry } from "./pageIndex";
 import { localDocLinks, localImageRefs, resolveLink, rewriteImages, rewriteLinks } from "./docLinks";
-import { idFromLink } from "./publishSearch";
+import { idFromLink, protectedPageId } from "./publishSearch";
 import type { McpResult, PublishStep, PublishTarget } from "./ipc";
 
 /**
@@ -253,6 +256,63 @@ function removeRecord(key: string, targetId: string): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
   useStore.getState().setPublishError(publishErrorKey(key, targetId), null);
   useStore.getState().bumpPublished();
+}
+
+/** Forget pages that no longer exist: from the log and every document's records. */
+function forgetUrls(gone: (url: string) => boolean): void {
+  for (const [key, byTarget] of Object.entries(loadRecords())) {
+    for (const [targetId, rec] of Object.entries(byTarget)) {
+      if (gone(rec.url)) removeRecord(key, targetId);
+    }
+  }
+  forgetPublished((e) => gone(e.url));
+}
+
+/**
+ * Published Documents (on open, and Refresh): forget GitHub Pages pages and
+ * gists that were deleted elsewhere (on github.com, or from another Mac).
+ * Returns the pages in every gh account's repo, so ones this Mac didn't
+ * publish are listed too. Rejects when GitHub can't be asked.
+ */
+export async function refreshPublished(): Promise<{ id: string; url: string }[]> {
+  const { logins } = await ghAccounts();
+  const accounts = logins.length > 0 ? logins : [null];
+  const pages = await Promise.all(
+    accounts.map(async (account) => {
+      const [status, list] = await Promise.all([pagesStatus(account), pagesList(account)]);
+      // The listing stops at 1000 files, past which absence proves nothing.
+      if (list.length < 1000) {
+        const host = `${status.repo.split("/")[0].toLowerCase()}.github.io`;
+        const ids = new Set(list.map((p) => p.id));
+        forgetUrls((url) => {
+          const id = protectedPageId(url);
+          return !!id && new URL(url).hostname === host && !ids.has(id);
+        });
+      }
+      return list;
+    }),
+  );
+  await forgetDeletedGists();
+  return pages.flat();
+}
+
+/** Forget every gist (of any document) that was deleted on github.com. */
+async function forgetDeletedGists(): Promise<void> {
+  const gists = new Set((await publishTargets()).filter((t) => t.kind === "gist").map((t) => t.id));
+  const checks = Object.values(loadRecords()).flatMap((byTarget) =>
+    Object.entries(byTarget)
+      .filter(([targetId]) => gists.has(targetId))
+      // The record's own account: a secret gist asked for as another 404s.
+      .map(async ([, rec]) => ((await gistExists(rec.id, rec.account ?? null)) ? null : rec.url)),
+  );
+  const gone = new Set<string>();
+  const failed: unknown[] = [];
+  for (const result of await Promise.allSettled(checks)) {
+    if (result.status === "rejected") failed.push(result.reason);
+    else if (result.value) gone.add(result.value);
+  }
+  forgetUrls((url) => gone.has(url));
+  if (failed.length > 0) throw failed[0];
 }
 
 const verified = new Set<string>();

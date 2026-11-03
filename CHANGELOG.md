@@ -5,6 +5,12 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Added
+- Published Documents has a Refresh button: it drops GitHub Pages pages and
+  gists deleted elsewhere (on github.com or from another Mac) and marks pages
+  whose source file was moved or deleted. Opening the window checks gists
+  and every gh account's pages too, not just the active account's pages.
+
 ## [0.21.7] — 2026-11-03
 
 ### Fixed

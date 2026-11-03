@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useStore } from "../store";
-import { forgetPublished, publishedPages } from "../publish";
+import { publishedPages, refreshPublished } from "../publish";
 import { pageMatches, protectedPageId } from "../publishSearch";
-import { copyToClipboard, pagesList, pagesPasswordGet, pagesStatus } from "../ipc";
+import { copyToClipboard, pagesPasswordGet, pathExists } from "../ipc";
 import { basename } from "../types";
 import { CopyButton } from "./CopyButton";
 
@@ -55,26 +55,33 @@ function Published() {
   // Pages on GitHub Pages that this Mac's history doesn't know about (public
   // or protected: Copy password says when there's no password saved).
   const [repoPages, setRepoPages] = useState<{ id: string; url: string }[]>([]);
+  // Local files pages were published from that are gone (moved or deleted).
+  const [missing, setMissing] = useState<Set<string>>(new Set());
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNote, setRefreshNote] = useState<string | null>(null);
+  const live = useRef(true);
+  const refresh = async (quiet: boolean) => {
+    setRefreshing(true);
+    setRefreshNote(null);
+    const local = [...new Set(publishedPages().filter((p) => !p.host).map((p) => p.path))];
+    const [pagesResult, existsResult] = await Promise.allSettled([
+      refreshPublished(),
+      Promise.all(local.map(async (path) => [path, await pathExists(path)] as const)),
+    ]);
+    if (!live.current) return;
+    setRefreshing(false);
+    if (pagesResult.status === "fulfilled") setRepoPages(pagesResult.value);
+    else if (!quiet) setRefreshNote(`Couldn't check GitHub: ${String(pagesResult.reason)}`);
+    // On open, no gh login or offline: just the history.
+    if (existsResult.status === "fulfilled") {
+      setMissing(new Set(existsResult.value.filter(([, exists]) => !exists).map(([path]) => path)));
+    } else if (!quiet) setRefreshNote(`Couldn't check files: ${String(existsResult.reason)}`);
+  };
   useEffect(() => {
-    let live = true;
-    Promise.all([pagesStatus(null), pagesList(null)])
-      .then(([status, list]) => {
-        if (!live) return;
-        setRepoPages(list);
-        // Pages of this account that are no longer in its repo were deleted
-        // (from another Mac, or on github.com): take them off the list. The
-        // listing stops at 1000 files, past which absence proves nothing.
-        if (list.length >= 1000) return;
-        const host = `${status.repo.split("/")[0].toLowerCase()}.github.io`;
-        const ids = new Set(list.map((p) => p.id));
-        forgetPublished((e) => {
-          const id = protectedPageId(e.url);
-          return !!id && new URL(e.url).hostname === host && !ids.has(id);
-        });
-      })
-      .catch(() => {}); // no gh login or offline: just the history
+    live.current = true;
+    void refresh(true);
     return () => {
-      live = false;
+      live.current = false;
     };
   }, []);
   const pages = publishedPages(tick);
@@ -166,13 +173,19 @@ function Published() {
             shown.map((p) => (
               <div key={p.url} className="pub-row">
                 <div className="pub-title">{p.title || basename(p.path).replace(/\.\w+$/, "")}</div>
-                <button
-                  className="pub-source"
-                  title="Open this file"
-                  onClick={() => openSource(p.host, p.path)}
-                >
-                  {p.host ? `${p.host}:${p.path}` : p.path}
-                </button>
+                {!p.host && missing.has(p.path) ? (
+                  <span className="pub-source pub-missing" title="This file was moved or deleted">
+                    {p.path} (not found)
+                  </span>
+                ) : (
+                  <button
+                    className="pub-source"
+                    title="Open this file"
+                    onClick={() => openSource(p.host, p.path)}
+                  >
+                    {p.host ? `${p.host}:${p.path}` : p.path}
+                  </button>
+                )}
                 <div className="pub-meta">
                   <span>{p.targetLabel}</span>
                   <span aria-hidden="true"> · </span>
@@ -195,10 +208,19 @@ function Published() {
         </div>
 
         <div className="remote-prompt-actions">
-          <span className="rb-where">
-            {pages.length + repoPages.length > 0 &&
-              `${shown.length + extra.length} of ${pages.length + repoPages.filter((r) => !known.has(r.id)).length}`}
+          <span className="rb-where" title={refreshNote ?? undefined}>
+            {refreshNote ??
+              (pages.length + repoPages.length > 0 &&
+                `${shown.length + extra.length} of ${pages.length + repoPages.filter((r) => !known.has(r.id)).length}`)}
           </span>
+          <button
+            className="remote-prompt-cancel"
+            title="Drop pages deleted elsewhere and check the files they came from"
+            disabled={refreshing}
+            onClick={() => void refresh(false)}
+          >
+            {refreshing ? "Refreshing…" : "Refresh"}
+          </button>
           <button className="remote-prompt-cancel" onClick={close}>
             Close
           </button>
