@@ -516,8 +516,7 @@ export function localLinksFor(doc: Doc, targetId: string): (url: string) => stri
  * unsaved changes to review (⌘Z takes them back, ⌘S keeps them).
  */
 export async function replaceDocText(docId: string, markdown: string): Promise<boolean> {
-  const s = useStore.getState();
-  if (s.views[docId]?.mode === "preview") s.setMode(docId, "split");
+  // The editor stays mounted (collapsed) in preview mode, so the view keeps its mode.
   for (let i = 0; i < 40; i++) {
     const view = getEditorView(docId);
     if (view) {
@@ -528,7 +527,10 @@ export async function replaceDocText(docId: string, markdown: string): Promise<b
     }
     await new Promise((r) => setTimeout(r, 50));
   }
-  return false;
+  // No editor (yet): change the text in the store; it's still an unsaved change.
+  if (!useStore.getState().docs[docId]) return false;
+  useStore.getState().setContent(docId, markdown);
+  return true;
 }
 
 export interface ImportedPage {

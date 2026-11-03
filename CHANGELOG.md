@@ -5,6 +5,12 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.21.7] — 2026-11-03
+
+### Fixed
+- Import from Link into an open file no longer switches it to editor and
+  preview; the view stays as it was.
+
 ## [0.21.6] — 2026-11-03
 
 ### Fixed
@@ -703,6 +709,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.21.7]: https://github.com/oztalha/open-md/releases/tag/v0.21.7
 [0.21.6]: https://github.com/oztalha/open-md/releases/tag/v0.21.6
 [0.21.5]: https://github.com/oztalha/open-md/releases/tag/v0.21.5
 [0.21.4]: https://github.com/oztalha/open-md/releases/tag/v0.21.4
