@@ -97,6 +97,8 @@ interface AppState {
   aboutOpen: boolean;
   /** File → Import from Link… is open. */
   importOpen: boolean;
+  /** Help → Send Feedback… is open. */
+  feedbackOpen: boolean;
   /** Whether the Publish dialog is showing. */
   publishOpen: boolean;
   /** Whether the Published Documents window is showing. */
@@ -139,6 +141,7 @@ interface AppState {
   setRemoteBrowser(mode: "open" | "save" | null): void;
   setAboutOpen(open: boolean): void;
   setImportOpen(open: boolean): void;
+  setFeedbackOpen(open: boolean): void;
   setRemoteDrop(paths: string[] | null): void;
   setPublishOpen(open: boolean): void;
   setPublishedOpen(open: boolean): void;
@@ -232,6 +235,7 @@ export const useStore = create<AppState>()((set, get) => ({
   remoteBrowser: null,
   aboutOpen: false,
   importOpen: false,
+  feedbackOpen: false,
   remoteDrop: null,
   publishOpen: false,
   publishedOpen: false,
@@ -361,6 +365,10 @@ export const useStore = create<AppState>()((set, get) => ({
 
   setImportOpen(open) {
     if (get().importOpen !== open) set({ importOpen: open });
+  },
+
+  setFeedbackOpen(open) {
+    if (get().feedbackOpen !== open) set({ feedbackOpen: open });
   },
 
   setRemoteBrowser(mode) {

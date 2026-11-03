@@ -1013,7 +1013,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
 
     let help_menu = SubmenuBuilder::new(app, "Help")
         .item(&MenuItemBuilder::with_id("help-github", "OpenMD on GitHub").build(app)?)
-        .item(&MenuItemBuilder::with_id("help-issue", "Report an Issue…").build(app)?)
+        .item(&MenuItemBuilder::with_id("help-feedback", "Send Feedback…").build(app)?)
         .build()?;
 
     let menu = MenuBuilder::new(app)
