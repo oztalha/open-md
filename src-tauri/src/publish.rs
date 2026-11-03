@@ -693,6 +693,30 @@ pub async fn gist_exists(id: String, account: Option<String>) -> Result<bool, St
     .map_err(|e| e.to_string())?
 }
 
+/// A published link's HTTP status after redirects, for Published Documents to
+/// spot pages that are gone. Errs when the host can't be reached (offline).
+#[tauri::command]
+pub async fn link_status(url: String) -> Result<u16, String> {
+    let scheme_ok = url.starts_with("https://") || url.starts_with("http://");
+    if !scheme_ok || url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(format!("Not a web link: {url}"));
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = Command::new("/usr/bin/curl")
+            .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "-L", "--max-redirs", "5"])
+            .args(["--proto", "=http,https", "--proto-redir", "=http,https", "--max-time", "10", "--", &url])
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| format!("Could not run curl: {e}"))?;
+        match String::from_utf8_lossy(&out.stdout).trim().parse::<u16>() {
+            Ok(code) if out.status.success() && code > 0 => Ok(code),
+            _ => Err(format!("Couldn't reach {url}")),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Delete a gist (Unpublish). Already gone counts as done.
 #[tauri::command]
 pub async fn gist_delete(id: String, account: Option<String>) -> Result<(), String> {

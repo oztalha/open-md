@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useStore } from "../store";
-import { publishedPages, refreshPublished } from "../publish";
+import { forgetPages, publishedPages, refreshPublished } from "../publish";
 import { pageMatches, protectedPageId } from "../publishSearch";
-import { copyToClipboard, pagesPasswordGet, pathExists } from "../ipc";
+import { copyToClipboard, linkStatus, pagesPasswordGet, pathExists } from "../ipc";
 import { basename } from "../types";
 import { CopyButton } from "./CopyButton";
 
@@ -34,6 +34,18 @@ function CopyPassword({ id }: { id: string }) {
   );
 }
 
+/**
+ * Links not to check by fetching: pages and gists are checked through the
+ * GitHub API by `refreshPublished` (a fresh page can 404 until Pages builds
+ * it), and github.com answers 404 for private files to a request without login.
+ */
+function skipLinkCheck(url: string): boolean {
+  return !!protectedPageId(url) || /^https:\/\/(gist\.)?github\.com\//.test(url);
+}
+
+/** Statuses that mean the page is gone, not just behind a login. */
+const GONE = new Set([404, 410]);
+
 function when(at: number): string {
   return new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
@@ -57,19 +69,31 @@ function Published() {
   const [repoPages, setRepoPages] = useState<{ id: string; url: string }[]>([]);
   // Local files pages were published from that are gone (moved or deleted).
   const [missing, setMissing] = useState<Set<string>>(new Set());
+  // Published links that answer 404/410, with the status.
+  const [unavailable, setUnavailable] = useState<Map<string, number>>(new Map());
   const [refreshing, setRefreshing] = useState(false);
   const [refreshNote, setRefreshNote] = useState<string | null>(null);
   const live = useRef(true);
   const refresh = async (quiet: boolean) => {
     setRefreshing(true);
     setRefreshNote(null);
-    const local = [...new Set(publishedPages().filter((p) => !p.host).map((p) => p.path))];
+    const listed = publishedPages();
+    const local = [...new Set(listed.filter((p) => !p.host).map((p) => p.path))];
+    const links = listed.map((p) => p.url).filter((url) => !skipLinkCheck(url));
+    // Unreachable (offline, VPN down) proves nothing: those stay available.
+    const checks = Promise.allSettled(links.map(async (url) => [url, await linkStatus(url)] as const));
     const [pagesResult, existsResult] = await Promise.allSettled([
       refreshPublished(),
       Promise.all(local.map(async (path) => [path, await pathExists(path)] as const)),
     ]);
+    const statuses = await checks;
     if (!live.current) return;
     setRefreshing(false);
+    setUnavailable(
+      new Map(
+        statuses.flatMap((r) => (r.status === "fulfilled" && GONE.has(r.value[1]) ? [r.value] : [])),
+      ),
+    );
     if (pagesResult.status === "fulfilled") setRepoPages(pagesResult.value);
     else if (!quiet) setRefreshNote(`Couldn't check GitHub: ${String(pagesResult.reason)}`);
     // On open, no gh login or offline: just the history.
@@ -196,9 +220,17 @@ function Published() {
                   </span>
                 </div>
                 <div className="pub-link">
-                  <a href={p.url} onClick={link(p.url)} title={p.url}>
+                  <a
+                    href={p.url}
+                    className={unavailable.has(p.url) ? "pub-gone" : undefined}
+                    onClick={link(p.url)}
+                    title={p.url}
+                  >
                     {p.url.replace(/^https?:\/\//, "")}
                   </a>
+                  {unavailable.has(p.url) && (
+                    <span className="pub-note">Unavailable ({unavailable.get(p.url)})</span>
+                  )}
                   <CopyButton text={p.url} tip="Copy link" />
                   {protectedPageId(p.url) && !p.open && <CopyPassword id={protectedPageId(p.url)!} />}
                 </div>
@@ -213,6 +245,18 @@ function Published() {
               (pages.length + repoPages.length > 0 &&
                 `${shown.length + extra.length} of ${pages.length + repoPages.filter((r) => !known.has(r.id)).length}`)}
           </span>
+          {unavailable.size > 0 && (
+            <button
+              className="remote-prompt-cancel"
+              title="Take pages whose link no longer opens off this list"
+              onClick={() => {
+                forgetPages(new Set(unavailable.keys()));
+                setUnavailable(new Map());
+              }}
+            >
+              Clear unavailable ({unavailable.size})
+            </button>
+          )}
           <button
             className="remote-prompt-cancel"
             title="Drop pages deleted elsewhere and check the files they came from"

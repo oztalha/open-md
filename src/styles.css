@@ -2451,6 +2451,10 @@ html.no-caret-animation .editor .cm-cursor {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.pub-link a.pub-gone {
+  color: var(--fg-faint);
+  text-decoration: line-through;
+}
 
 /* Publish dialog */
 .publish-dialog {

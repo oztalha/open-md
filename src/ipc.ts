@@ -299,6 +299,11 @@ export function gistExists(id: string, account: string | null): Promise<boolean>
   return invoke("gist_exists", { id, account });
 }
 
+/** A published link's HTTP status (after redirects); rejects when it can't be reached. */
+export function linkStatus(url: string): Promise<number> {
+  return invoke("link_status", { url });
+}
+
 /** publish.json's text, for the in-app targets editor. */
 export function publishConfigRead(): Promise<string> {
   return invoke<string>("publish_config_read");

@@ -10,6 +10,8 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
   gists deleted elsewhere (on github.com or from another Mac) and marks pages
   whose source file was moved or deleted. Opening the window checks gists
   and every gh account's pages too, not just the active account's pages.
+- Published Documents marks links that no longer open (404 or 410), and
+  Clear unavailable takes them off the list.
 
 ## [0.21.7] — 2026-11-03
 

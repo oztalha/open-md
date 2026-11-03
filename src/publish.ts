@@ -268,6 +268,11 @@ function forgetUrls(gone: (url: string) => boolean): void {
   forgetPublished((e) => gone(e.url));
 }
 
+/** Published Documents → Clear unavailable: forget pages whose link is gone. */
+export function forgetPages(urls: Set<string>): void {
+  forgetUrls((url) => urls.has(url));
+}
+
 /**
  * Published Documents (on open, and Refresh): forget GitHub Pages pages and
  * gists that were deleted elsewhere (on github.com, or from another Mac).
