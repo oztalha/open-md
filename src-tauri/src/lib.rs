@@ -1117,6 +1117,7 @@ pub fn run() {
             publish::publish_mcp_close,
             publish::publish_gist,
             publish::gist_exists,
+            publish::link_status,
             pages::pages_status,
             pages::pages_list,
             pages::pages_live,
