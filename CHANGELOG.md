@@ -14,7 +14,8 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
   Clear unavailable takes them off the list.
 - Help → Send Feedback… (replaces Report an Issue…): write what should
   change, and Send opens a GitHub issue with it filled in, optionally with
-  the app version, window size and view (never file paths or text).
+  the app version, window size and view (never file paths or text). It's
+  also a button in the title bar.
 
 ### Fixed
 - The app menu, About, Quit and error dialogs say OpenMD instead of Markdown.
