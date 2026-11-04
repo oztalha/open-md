@@ -717,10 +717,10 @@ fn register_as_default_markdown_app() {
 }
 
 fn build_menu(app: &AppHandle) -> tauri::Result<()> {
-    let app_menu = SubmenuBuilder::new(app, "Markdown")
+    let app_menu = SubmenuBuilder::new(app, "OpenMD")
         // Our own About window (not the predefined panel): macOS's native one
         // only shows plain text, so the project link couldn't be clickable.
-        .item(&MenuItemBuilder::with_id("about", "About Markdown").build(app)?)
+        .item(&MenuItemBuilder::with_id("about", "About OpenMD").build(app)?)
         .separator()
         .item(
             &MenuItemBuilder::with_id("settings", "Settings…")
@@ -735,7 +735,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .show_all()
         .separator()
         .item(
-            &MenuItemBuilder::with_id("quit", "Quit Markdown")
+            &MenuItemBuilder::with_id("quit", "Quit OpenMD")
                 .accelerator("CmdOrCtrl+Q")
                 .build(app)?,
         )

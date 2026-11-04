@@ -16,6 +16,9 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
   change, and Send opens a GitHub issue with it filled in, optionally with
   the app version, window size and view (never file paths or text).
 
+### Fixed
+- The app menu, About, Quit and error dialogs say OpenMD instead of Markdown.
+
 ## [0.21.7] — 2026-11-03
 
 ### Fixed
