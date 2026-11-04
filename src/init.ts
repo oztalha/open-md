@@ -215,8 +215,8 @@ function handleMenu(id: string) {
     case "help-github":
       void openUrl(REPO_URL);
       break;
-    case "help-issue":
-      void openUrl(`${REPO_URL}/issues/new`);
+    case "help-feedback":
+      s.setFeedbackOpen(true);
       break;
     case "clear-recent":
       clearRecents();

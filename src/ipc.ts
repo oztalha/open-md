@@ -198,7 +198,7 @@ export function confirmDiscardAll(count: number): Promise<boolean> {
 }
 
 export async function showError(text: string): Promise<void> {
-  await message(text, { title: "Markdown", kind: "error" });
+  await message(text, { title: "OpenMD", kind: "error" });
 }
 
 // --- publishing (see src-tauri/src/publish.rs) ------------------------------

@@ -1961,7 +1961,22 @@ html.no-caret-animation .editor .cm-cursor {
   padding: 6px 9px;
   font-size: 13px;
 }
-.remote-browser .remote-prompt-actions {
+.remote-browser /* Help → Send Feedback… */
+.feedback-dialog {
+  width: min(520px, calc(100vw - 48px));
+}
+.feedback-text {
+  display: block;
+  min-height: 130px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.feedback-dialog .feedback-hint {
+  margin: 10px 0 8px;
+  color: var(--fg-muted);
+}
+
+.remote-prompt-actions {
   align-items: center;
   margin-top: 0;
 }

@@ -231,6 +231,22 @@ function GearIcon() {
   );
 }
 
+/** A megaphone: Send Feedback (a speech bubble already means comments). */
+function FeedbackIcon() {
+  return (
+    <svg width="15" height="14" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M2.5 6.5v3h2l7 3.5v-10l-7 3.5h-2ZM4.5 9.5l1 4M14 6.5v3"
+      />
+    </svg>
+  );
+}
+
 const GRID_COLS = 8;
 const GRID_ROWS = 6;
 
@@ -363,6 +379,13 @@ export function TitleBar() {
           >
             <GearIcon />
             <Keycap show={modHeld} label="⌘," />
+          </button>
+          <button
+            className="titlebar-btn"
+            data-tip="Send feedback"
+            onClick={() => useStore.getState().setFeedbackOpen(true)}
+          >
+            <FeedbackIcon />
           </button>
           <TableButton docId={doc.id} leafId={activeId} mode={mode} />
           <button
