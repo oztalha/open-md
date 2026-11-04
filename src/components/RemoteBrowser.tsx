@@ -22,6 +22,49 @@ import { isGithubHost, isGithubUrl, isValidHost, splitGithubSpec, splitLineSuffi
 import { basename, displayTitle, isCodePath } from "../types";
 
 const HOST_KEY = "remoteBrowserHost";
+const VIEW_KEY = "remoteBrowserView";
+const SORT_KEY = "remoteBrowserSort";
+
+type SortKey = "name" | "modified" | "size";
+interface Sort {
+  key: SortKey;
+  desc: boolean;
+}
+
+function loadSort(): Sort {
+  try {
+    const s = JSON.parse(localStorage.getItem(SORT_KEY) ?? "");
+    if (["name", "modified", "size"].includes(s?.key)) return { key: s.key, desc: !!s.desc };
+  } catch {
+    /* default below */
+  }
+  return { key: "modified", desc: true };
+}
+
+/** Like Finder: "Today at 2:41 PM", "Yesterday at …", else "Nov 2, 2026 at 1:34 PM". */
+function formatModified(seconds?: number): string {
+  if (seconds == null) return "--";
+  const d = new Date(seconds * 1000);
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const today = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+  if (day === today) return `Today at ${time}`;
+  if (day === today - 86_400_000) return `Yesterday at ${time}`;
+  return `${d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} at ${time}`;
+}
+
+function formatSize(bytes?: number): string {
+  if (bytes == null) return "--";
+  if (bytes < 1000) return `${bytes} bytes`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let n = bytes / 1000;
+  let i = 0;
+  while (n >= 1000 && i < units.length - 1) {
+    n /= 1000;
+    i++;
+  }
+  return `${n < 10 ? n.toFixed(1) : Math.round(n)} ${units[i]}`;
+}
 const dirKey = (host: string) => `remoteBrowserDir:${host}`;
 const DOC_RE = /\.(md|markdown|mdown|mkdn|mkd|txt|csv|tsv|json|jsonl|ndjson|svg|png|jpe?g|gif|webp|bmp|ico|avif)$/i;
 const MARKDOWN_RE = /\.(md|markdown|mdown|mkdn|mkd)$/i;
@@ -108,6 +151,19 @@ function Browser({ mode }: { mode: "open" | "save" }) {
   const [missing, setMissing] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   const [fileName, setFileName] = useState(initial.name);
+  // List view (columns: date modified, size), the default, or names only.
+  const [listView, setListView] = useState(() => localStorage.getItem(VIEW_KEY) !== "names");
+  const [sort, setSort] = useState<Sort>(loadSort);
+  const sortBy = (key: SortKey) => {
+    // A new column starts newest/biggest first (like Finder), name A-Z.
+    const next = sort.key === key ? { key, desc: !sort.desc } : { key, desc: key !== "name" };
+    setSort(next);
+    localStorage.setItem(SORT_KEY, JSON.stringify(next));
+  };
+  const toggleView = (on: boolean) => {
+    setListView(on);
+    localStorage.setItem(VIEW_KEY, on ? "list" : "names");
+  };
   const request = useRef(0);
   // True once the user types/pastes in the path bar; a listing that finishes
   // afterwards must not overwrite what they entered.
@@ -444,7 +500,22 @@ function Browser({ mode }: { mode: "open" | "save" }) {
   }, [remoteDrop, listing, host, load]);
   const copyWithHost = useSettings((st) => st.settings.copyPathWithHost);
 
-  const entries = (listing?.entries ?? []).filter((e) => showHidden || !e.name.startsWith("."));
+  const visible = (listing?.entries ?? []).filter((e) => showHidden || !e.name.startsWith("."));
+  // The host reported times and sizes (not GitHub, not hosts without GNU find).
+  const hasMeta = visible.some((e) => e.modified != null);
+  const columns = listView && hasMeta;
+  const byName = (a: { name: string }, b: { name: string }) =>
+    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+  const entries =
+    columns && sort.key !== "name"
+      ? [...visible].sort((a, b) => {
+          const va = sort.key === "modified" ? (a.modified ?? 0) : a.isDir ? -1 : (a.size ?? 0);
+          const vb = sort.key === "modified" ? (b.modified ?? 0) : b.isDir ? -1 : (b.size ?? 0);
+          return (sort.desc ? vb - va : va - vb) || byName(a, b);
+        })
+      : columns && sort.desc
+        ? [...visible].reverse()
+        : visible;
   const dir = listing?.dir ?? null;
   // Markdown files in this folder (not subfolders), for "Open all".
   const markdownHere = dir ? entries.filter((e) => !e.isDir && MARKDOWN_RE.test(e.name)) : [];
@@ -465,14 +536,24 @@ function Browser({ mode }: { mode: "open" | "save" }) {
           <span className="remote-prompt-label">
             {mode === "open" ? "Open remote file" : "Save to remote"}
           </span>
-          <label className="rb-hidden-toggle">
-            <input
-              type="checkbox"
-              checked={showHidden}
-              onChange={(event) => setShowHidden(event.target.checked)}
-            />
-            Hidden files
-          </label>
+          <span className="rb-header-tools">
+            <span className="rb-view" role="radiogroup" aria-label="View">
+              <button className={listView ? "on" : ""} data-tip="List: date modified and size" onClick={() => toggleView(true)}>
+                List
+              </button>
+              <button className={listView ? "" : "on"} data-tip="Names only" onClick={() => toggleView(false)}>
+                Names
+              </button>
+            </span>
+            <label className="rb-hidden-toggle">
+              <input
+                type="checkbox"
+                checked={showHidden}
+                onChange={(event) => setShowHidden(event.target.checked)}
+              />
+              Hidden files
+            </label>
+          </span>
         </div>
 
         {mode === "open" && !githubOpen && (
@@ -634,6 +715,20 @@ function Browser({ mode }: { mode: "open" | "save" }) {
             <div className="rb-status">Connecting…</div>
           ) : (
             <>
+              {columns && (
+                <div className="rb-row rb-columns">
+                  {(["name", "modified", "size"] as const).map((key) => (
+                    <button
+                      key={key}
+                      className={`rb-col-${key}${sort.key === key ? " on" : ""}`}
+                      onClick={() => sortBy(key)}
+                    >
+                      {key === "name" ? "Name" : key === "modified" ? "Date Modified" : "Size"}
+                      {sort.key === key && <span className="rb-sort">{sort.desc ? "▼" : "▲"}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
               {dir !== "/" && (
                 <div className="rb-row rb-dir" onClick={() => void load(host, parentOf(dir!))}>
                   <FolderIcon />
@@ -677,6 +772,12 @@ function Browser({ mode }: { mode: "open" | "save" }) {
                   >
                     {entry.isDir ? <FolderIcon /> : <FileIcon />}
                     <span className="rb-name">{entry.name}</span>
+                    {columns && (
+                      <>
+                        <span className="rb-col-modified">{formatModified(entry.modified)}</span>
+                        <span className="rb-col-size">{entry.isDir ? "--" : formatSize(entry.size)}</span>
+                      </>
+                    )}
                   </div>
                 );
               })}

@@ -58,7 +58,8 @@ export function readRemoteFile(host: string, path: string): Promise<string> {
 export interface RemoteListing {
   /** Resolved absolute directory. */
   dir: string;
-  entries: { name: string; isDir: boolean }[];
+  /** `modified` (seconds since the epoch) and `size` (bytes) when the host reports them. */
+  entries: { name: string; isDir: boolean; modified?: number; size?: number }[];
 }
 
 /** List a remote directory over SSH (for the remote file browser). */

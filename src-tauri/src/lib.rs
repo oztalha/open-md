@@ -365,6 +365,36 @@ struct RemoteEntry {
     name: String,
     #[serde(rename = "isDir")]
     is_dir: bool,
+    /// Last modified, in seconds since the epoch (not on GitHub or hosts without GNU find).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    modified: Option<f64>,
+    /// Size in bytes (files).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size: Option<u64>,
+}
+
+/// One line of the remote listing: `type\tmtime\tsize\tname` from GNU find,
+/// or `name` / `name/` from `ls -1ApL` (hosts without GNU find).
+fn parse_listing_line(line: &str) -> Option<RemoteEntry> {
+    if line.is_empty() {
+        return None;
+    }
+    let parts: Vec<&str> = line.splitn(4, '\t').collect();
+    if let [kind, mtime, size, name] = parts[..] {
+        if kind.len() == 1 && !name.is_empty() {
+            let is_dir = kind == "d";
+            return Some(RemoteEntry {
+                name: name.to_string(),
+                is_dir,
+                modified: mtime.parse().ok(),
+                size: if is_dir { None } else { size.parse().ok() },
+            });
+        }
+    }
+    Some(match line.strip_suffix('/') {
+        Some(name) => RemoteEntry { name: name.to_string(), is_dir: true, modified: None, size: None },
+        None => RemoteEntry { name: line.to_string(), is_dir: false, modified: None, size: None },
+    })
 }
 
 #[derive(serde::Serialize)]
@@ -381,13 +411,22 @@ struct RemoteListing {
 async fn list_remote(host: String, path: String) -> Result<RemoteListing, String> {
     if github::is_github(&host) {
         let (dir, entries) = github::blocking(move || github::list(&host, &path)).await?;
-        let entries = entries.into_iter().map(|(name, is_dir)| RemoteEntry { name, is_dir }).collect();
+        let entries = entries.into_iter().map(|(name, is_dir)| RemoteEntry { name, is_dir, modified: None, size: None }).collect();
         return Ok(RemoteListing { dir, entries });
     }
     validate_host(&host)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<RemoteListing, String> {
         let q = shell_quote(if path.is_empty() { "~" } else { &path });
-        let output = ssh_run(&host, &format!("cd -- {q} && pwd && {{ ls -1ApL 2>/dev/null || true; }}"))
+        // GNU find gives times and sizes (symlinks followed, like `ls -L`);
+        // elsewhere (macOS, BSD) names only.
+        let output = ssh_run(
+            &host,
+            &format!(
+                "cd -- {q} && pwd && if find . -maxdepth 0 -printf '' 2>/dev/null; then \
+                 find -L . -mindepth 1 -maxdepth 1 -printf '%y\\t%T@\\t%s\\t%f\\n' 2>/dev/null; true; \
+                 else ls -1ApL 2>/dev/null || true; fi"
+            ),
+        )
             .map_err(|e| format!("Could not run ssh: {e}"))?;
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr);
@@ -396,13 +435,7 @@ async fn list_remote(host: String, path: String) -> Result<RemoteListing, String
         let text = String::from_utf8_lossy(&output.stdout);
         let mut lines = text.lines();
         let dir = lines.next().unwrap_or("/").to_string();
-        let entries = lines
-            .filter(|l| !l.is_empty())
-            .map(|l| match l.strip_suffix('/') {
-                Some(name) => RemoteEntry { name: name.to_string(), is_dir: true },
-                None => RemoteEntry { name: l.to_string(), is_dir: false },
-            })
-            .collect();
+        let entries = lines.filter_map(parse_listing_line).collect();
         Ok(RemoteListing { dir, entries })
     })
     .await
@@ -1206,6 +1239,17 @@ pub fn run() {
 
 #[cfg(test)]
 mod search_tests {
+    #[test]
+    fn listing_lines() {
+        let e = super::parse_listing_line("f\t1793690670.25\t2546\tnotes v2.md").unwrap();
+        assert_eq!((e.name.as_str(), e.is_dir, e.modified, e.size), ("notes v2.md", false, Some(1793690670.25), Some(2546)));
+        let d = super::parse_listing_line("d\t1793690670.0\t4096\tdocs").unwrap();
+        assert!(d.is_dir && d.size.is_none());
+        let l = super::parse_listing_line("docs/").unwrap();
+        assert!(l.is_dir && l.modified.is_none());
+        assert_eq!(super::parse_listing_line("a.md").unwrap().name, "a.md");
+    }
+
     #[test]
     fn grep_output_with_colons_in_paths() {
         let paths = vec!["/a/b.md".to_string(), "/x/notes: v2.md".to_string()];

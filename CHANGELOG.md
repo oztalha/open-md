@@ -5,7 +5,13 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.21.8] — 2026-11-04
+
 ### Added
+- Remote browser: a list view (the default) with Date Modified and Size
+  columns, sorted newest first; click a column to sort by it, again to
+  reverse. "Names" switches back to the plain list. Hosts without GNU find
+  (and GitHub) show names only.
 - Published Documents has a Refresh button: it drops GitHub Pages pages and
   gists deleted elsewhere (on github.com or from another Mac) and marks pages
   whose source file was moved or deleted. Opening the window checks gists
@@ -717,6 +723,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.21.8]: https://github.com/oztalha/open-md/releases/tag/v0.21.8
 [0.21.7]: https://github.com/oztalha/open-md/releases/tag/v0.21.7
 [0.21.6]: https://github.com/oztalha/open-md/releases/tag/v0.21.6
 [0.21.5]: https://github.com/oztalha/open-md/releases/tag/v0.21.5
