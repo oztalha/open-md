@@ -1787,8 +1787,9 @@ html.no-caret-animation .editor .cm-cursor {
 }
 
 /* Remote file browser (Open Remote… / Save to Remote…) */
-.remote-browser {
-  width: min(680px, calc(100vw - 48px));
+/* Two classes, so the plain .remote-prompt width further down doesn't win. */
+.remote-prompt.remote-browser {
+  width: min(760px, calc(100vw - 48px));
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1973,11 +1974,40 @@ html.no-caret-animation .editor .cm-cursor {
   white-space: nowrap;
 }
 .rb-row .rb-col-modified {
-  width: 168px;
+  width: var(--rb-mod-w, 150px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 8px;
+  box-sizing: border-box;
 }
 .rb-row .rb-col-size {
-  width: 64px;
+  width: var(--rb-size-w, 64px);
   text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rb-columns button {
+  position: relative;
+}
+.rb-col-resize {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  left: -5px;
+  width: 9px;
+  cursor: col-resize;
+}
+.rb-col-resize::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: 1px;
+  background: var(--border);
+}
+.rb-col-resize:hover::after {
+  background: var(--accent);
 }
 .rb-row.selected .rb-col-modified,
 .rb-row.selected .rb-col-size {

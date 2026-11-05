@@ -24,6 +24,24 @@ import { basename, displayTitle, isCodePath } from "../types";
 const HOST_KEY = "remoteBrowserHost";
 const VIEW_KEY = "remoteBrowserView";
 const SORT_KEY = "remoteBrowserSort";
+const WIDTHS_KEY = "remoteBrowserColumns";
+
+/** Date Modified and Size column widths (px); Name takes the rest. */
+interface Widths {
+  modified: number;
+  size: number;
+}
+const DEFAULT_WIDTHS: Widths = { modified: 150, size: 64 };
+
+function loadWidths(): Widths {
+  try {
+    const w = JSON.parse(localStorage.getItem(WIDTHS_KEY) ?? "");
+    if (typeof w?.modified === "number" && typeof w?.size === "number") return w;
+  } catch {
+    /* default below */
+  }
+  return DEFAULT_WIDTHS;
+}
 
 type SortKey = "name" | "modified" | "size";
 interface Sort {
@@ -154,6 +172,36 @@ function Browser({ mode }: { mode: "open" | "save" }) {
   // List view (columns: date modified, size), the default, or names only.
   const [listView, setListView] = useState(() => localStorage.getItem(VIEW_KEY) !== "names");
   const [sort, setSort] = useState<Sort>(loadSort);
+  const [widths, setWidths] = useState<Widths>(loadWidths);
+  // Drag a column divider, like Finder: left of Date Modified trades width
+  // between Name and Date Modified, left of Size between Date Modified and Size.
+  const startResize = (edge: "modified" | "size") => (event: React.PointerEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const x0 = event.clientX;
+    const w0 = widths;
+    document.body.classList.add("resizing-x");
+    let latest = w0;
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - x0;
+      latest =
+        edge === "modified"
+          ? { ...w0, modified: Math.min(320, Math.max(48, w0.modified - dx)) }
+          : (() => {
+              const modified = Math.min(320, Math.max(48, w0.modified + dx));
+              return { modified, size: Math.max(40, w0.size - (modified - w0.modified)) };
+            })();
+      setWidths(latest);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.classList.remove("resizing-x");
+      localStorage.setItem(WIDTHS_KEY, JSON.stringify(latest));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
   const sortBy = (key: SortKey) => {
     // A new column starts newest/biggest first (like Finder), name A-Z.
     const next = sort.key === key ? { key, desc: !sort.desc } : { key, desc: key !== "name" };
@@ -694,6 +742,7 @@ function Browser({ mode }: { mode: "open" | "save" }) {
         <div
           className="rb-list"
           aria-busy={loading}
+          style={{ "--rb-mod-w": `${widths.modified}px`, "--rb-size-w": `${widths.size}px` } as React.CSSProperties}
           onContextMenu={(e) => {
             e.preventDefault();
             void showFolderMenu();
@@ -721,8 +770,21 @@ function Browser({ mode }: { mode: "open" | "save" }) {
                     <button
                       key={key}
                       className={`rb-col-${key}${sort.key === key ? " on" : ""}`}
+                      title={key === "name" ? undefined : "Drag the left edge to resize"}
                       onClick={() => sortBy(key)}
                     >
+                      {key !== "name" && (
+                        <span
+                          className="rb-col-resize"
+                          onPointerDown={startResize(key)}
+                          onClick={(e) => e.stopPropagation()}
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            setWidths(DEFAULT_WIDTHS);
+                            localStorage.removeItem(WIDTHS_KEY);
+                          }}
+                        />
+                      )}
                       {key === "name" ? "Name" : key === "modified" ? "Date Modified" : "Size"}
                       {sort.key === key && <span className="rb-sort">{sort.desc ? "▼" : "▲"}</span>}
                     </button>
