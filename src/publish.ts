@@ -780,10 +780,11 @@ async function publishText(
       pages!,
     ));
   } else {
-    const file = await writePublishTemp(
-      `${title || "document"}.${html ? "html" : "md"}`,
-      contents,
-    );
+    // A file that isn't markdown (an .html page, .csv, .json…) keeps its own
+    // extension, which is how some targets tell what kind of file it is.
+    const own = /\.([A-Za-z0-9]{1,8})$/.exec(doc.remote?.path ?? doc.path ?? "")?.[1]?.toLowerCase();
+    const ext = html ? "html" : own && !/^(md|markdown|mdown|mkdn|mkd)$/.test(own) ? own : "md";
+    const file = await writePublishTemp(`${title || "document"}.${ext}`, contents);
     ({ id, url } = await publishTo(
       doc,
       target,

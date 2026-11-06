@@ -5,6 +5,13 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.21.10] — 2026-11-05
+
+### Fixed
+- Publishing a file that isn't markdown (an .html page, .csv, .json, …) to a
+  target that uploads files kept naming the upload `<title>.md`, so it showed
+  as markdown text there. The upload now keeps the file's own extension.
+
 ## [0.21.9] — 2026-11-05
 
 ### Changed
@@ -730,6 +737,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.21.10]: https://github.com/oztalha/open-md/releases/tag/v0.21.10
 [0.21.9]: https://github.com/oztalha/open-md/releases/tag/v0.21.9
 [0.21.8]: https://github.com/oztalha/open-md/releases/tag/v0.21.8
 [0.21.7]: https://github.com/oztalha/open-md/releases/tag/v0.21.7
