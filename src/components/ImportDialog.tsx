@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { publishTargets } from "../ipc";
+import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import type { PublishTarget } from "../ipc";
 import {
   fileForPage,
   importFromLink,
   importTargets,
   linkWhenSaved,
+  publishedFor,
   localLinksFor,
   pageForLink,
   replaceDocText,
@@ -54,7 +56,17 @@ function Import() {
 
   useEffect(() => {
     publishTargets()
-      .then(setTargets)
+      .then(async (all) => {
+        setTargets(all);
+        // Start with the link the user most likely means: the open file's page
+        // on a target that can import, else a matching link on the clipboard.
+        const s = useStore.getState();
+        const published = publishedFor(s.docs[s.activeId]);
+        const own = importTargets(all).map((t) => published[t.id]?.url).find(Boolean);
+        const clip = own ? null : ((await readText().catch(() => "")) ?? "").trim();
+        const start = own ?? (clip && !/\s/.test(clip) && pageForLink(all, clip) ? clip : "");
+        if (start) setLink((current) => current || start);
+      })
       .catch((err) => setError(String(err)));
   }, []);
 
@@ -134,6 +146,7 @@ function Import() {
               autoCapitalize="off"
               autoCorrect="off"
               autoFocus
+              onFocus={(event) => event.currentTarget.select()}
               disabled={busy}
               onChange={(event) => {
                 setLink(event.target.value);
