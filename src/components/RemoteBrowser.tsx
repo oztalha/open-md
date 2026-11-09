@@ -23,7 +23,6 @@ import { isGithubHost, isGithubUrl, isValidHost, splitGithubSpec, splitLineSuffi
 import { basename, displayTitle, isCodePath } from "../types";
 
 const HOST_KEY = "remoteBrowserHost";
-const VIEW_KEY = "remoteBrowserView";
 const SORT_KEY = "remoteBrowserSort";
 const WIDTHS_KEY = "remoteBrowserColumns";
 
@@ -170,8 +169,7 @@ function Browser({ mode }: { mode: "open" | "save" }) {
   const [missing, setMissing] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   const [fileName, setFileName] = useState(initial.name);
-  // List view (columns: date modified, size), the default, or names only.
-  const [listView, setListView] = useState(() => localStorage.getItem(VIEW_KEY) !== "names");
+
   const [sort, setSort] = useState<Sort>(loadSort);
   const [widths, setWidths] = useState<Widths>(loadWidths);
   // Drag a column divider, like Finder: left of Date Modified trades width
@@ -209,10 +207,7 @@ function Browser({ mode }: { mode: "open" | "save" }) {
     setSort(next);
     localStorage.setItem(SORT_KEY, JSON.stringify(next));
   };
-  const toggleView = (on: boolean) => {
-    setListView(on);
-    localStorage.setItem(VIEW_KEY, on ? "list" : "names");
-  };
+
   const request = useRef(0);
   // True once the user types/pastes in the path bar; a listing that finishes
   // afterwards must not overwrite what they entered.
@@ -563,7 +558,7 @@ function Browser({ mode }: { mode: "open" | "save" }) {
   const visible = (listing?.entries ?? []).filter((e) => showHidden || !e.name.startsWith("."));
   // The host reported times and sizes (not GitHub, not hosts without GNU find).
   const hasMeta = visible.some((e) => e.modified != null);
-  const columns = listView && hasMeta;
+  const columns = hasMeta;
   const byName = (a: { name: string }, b: { name: string }) =>
     a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
   const entries =
@@ -597,14 +592,6 @@ function Browser({ mode }: { mode: "open" | "save" }) {
             {mode === "open" ? "Open remote file" : "Save to remote"}
           </span>
           <span className="rb-header-tools">
-            <span className="rb-view" role="radiogroup" aria-label="View">
-              <button className={listView ? "on" : ""} data-tip="List: date modified and size" onClick={() => toggleView(true)}>
-                List
-              </button>
-              <button className={listView ? "" : "on"} data-tip="Names only" onClick={() => toggleView(false)}>
-                Names
-              </button>
-            </span>
             <label className="rb-hidden-toggle">
               <input
                 type="checkbox"

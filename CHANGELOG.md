@@ -5,6 +5,12 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.21.13] — 2026-11-09
+
+### Changed
+- Remote browser: the list view is the only view (the Names switch is gone),
+  and the column dividers you drag are visible.
+
 ## [0.21.12] — 2026-11-09
 
 ### Added
@@ -754,6 +760,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.21.13]: https://github.com/oztalha/open-md/releases/tag/v0.21.13
 [0.21.12]: https://github.com/oztalha/open-md/releases/tag/v0.21.12
 [0.21.11]: https://github.com/oztalha/open-md/releases/tag/v0.21.11
 [0.21.10]: https://github.com/oztalha/open-md/releases/tag/v0.21.10

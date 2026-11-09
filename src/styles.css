@@ -1913,25 +1913,6 @@ html.no-caret-animation .editor .cm-cursor {
   align-items: center;
   gap: 12px;
 }
-.rb-view {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  border-radius: 6px;
-  background: var(--bg-secondary);
-}
-.rb-view button {
-  all: unset;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 11.5px;
-  color: var(--fg-muted);
-  cursor: default;
-}
-.rb-view button.on {
-  background: var(--code-bg);
-  color: var(--fg);
-}
 .rb-columns {
   position: sticky;
   top: -4px;
@@ -1997,14 +1978,23 @@ html.no-caret-animation .editor .cm-cursor {
   width: 9px;
   cursor: col-resize;
 }
+.rb-columns .rb-col-modified,
+.rb-columns .rb-col-size {
+  overflow: visible; /* the drag handles sit just outside the column */
+}
 .rb-col-resize::after {
   content: "";
   position: absolute;
-  top: 4px;
-  bottom: 4px;
+  top: 3px;
+  bottom: 3px;
   left: 4px;
-  width: 1px;
-  background: var(--border);
+  width: 1.5px;
+  border-radius: 1px;
+  background: var(--fg-muted);
+  opacity: 0.45;
+}
+.rb-col-resize:hover::after {
+  opacity: 1;
 }
 .rb-col-resize:hover::after {
   background: var(--accent);
