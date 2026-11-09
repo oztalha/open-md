@@ -5,6 +5,17 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.21.12] — 2026-11-09
+
+### Added
+- Open Remote (⇧⌘O): paste a published page's link and press Enter to open
+  the file it was published from (pages published from this Mac).
+
+### Fixed
+- Publish selected the target used last (e.g. another service) even for a
+  document already published elsewhere, so Update wasn't the default. It now
+  starts on the target the document was last published to.
+
 ## [0.21.11] — 2026-11-05
 
 ### Changed
@@ -743,6 +754,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.21.12]: https://github.com/oztalha/open-md/releases/tag/v0.21.12
 [0.21.11]: https://github.com/oztalha/open-md/releases/tag/v0.21.11
 [0.21.10]: https://github.com/oztalha/open-md/releases/tag/v0.21.10
 [0.21.9]: https://github.com/oztalha/open-md/releases/tag/v0.21.9

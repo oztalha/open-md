@@ -524,6 +524,21 @@ export function fileForPage(targetId: string, id: string): string | null {
   return null;
 }
 
+/**
+ * The file (`/path`, or `host:/path`) a published page's link came from on
+ * this Mac, if any. The link may carry a title slug, query or #fragment.
+ */
+export function fileForLink(link: string): string | null {
+  const url = link.trim();
+  for (const [key, byTarget] of Object.entries(loadRecords())) {
+    for (const r of Object.values(byTarget)) {
+      const page = r.url?.replace(/[/?#]+$/, "");
+      if (page && (url === page || (url.startsWith(page) && /^[/?#]/.test(url.slice(page.length))))) return key;
+    }
+  }
+  return null;
+}
+
 /** The import target and page id a link points at, without fetching anything. */
 export function pageForLink(targets: PublishTarget[], link: string): { target: PublishTarget; id: string } | null {
   for (const target of importTargets(targets)) {

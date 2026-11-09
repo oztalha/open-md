@@ -147,13 +147,34 @@ function Publish() {
     setLinking(false);
     setRemovalShown(false);
   }, [docId]);
+  // Once the targets are known (and the document's records found under its
+  // real path), start on the target it was published to.
+  useEffect(() => {
+    if (!targets) return;
+    void resolveRealKey(useStore.getState().docs[docId ?? ""]).then(() =>
+      setSelected((cur) => startTarget(targets, cur)),
+    );
+    // startTarget reads the latest records itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docId, targets]);
+
+  // Start on where this document was last published, so Update is the default;
+  // a document not published yet starts on the target used last.
+  const startTarget = (list: PublishTarget[], fallback: string): string => {
+    const mine = publishedFor(useStore.getState().docs[docId ?? ""]);
+    const latest = list
+      .filter((t) => mine[t.id])
+      .sort((a, b) => (mine[b.id].at ?? 0) - (mine[a.id].at ?? 0))[0];
+    if (latest) return latest.id;
+    return list.some((t) => t.id === fallback) ? fallback : (list[0]?.id ?? "");
+  };
 
   const load = () =>
     publishTargets()
       .then((list) => {
         setTargets(list);
         setLoadError(null);
-        setSelected((cur) => (list.some((t) => t.id === cur) ? cur : (list[0]?.id ?? "")));
+        setSelected((cur) => startTarget(list, cur));
       })
       .catch((err) => setLoadError(String(err)));
 

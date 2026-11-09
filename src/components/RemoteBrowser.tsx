@@ -17,6 +17,7 @@ import {
 import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { CopyButton } from "./CopyButton";
+import { fileForLink } from "../publish";
 import type { RemoteListing } from "../ipc";
 import { isGithubHost, isGithubUrl, isValidHost, splitGithubSpec, splitLineSuffix } from "../remote";
 import { basename, displayTitle, isCodePath } from "../types";
@@ -482,6 +483,17 @@ function Browser({ mode }: { mode: "open" | "save" }) {
     let h = host;
     let p = pathDraft.trim() || "~";
     if (isGithubUrl(p)) return void goToGithubUrl(p);
+    // A published page's link: open the file it was published from.
+    if (/^https?:\/\//i.test(p)) {
+      const source = fileForLink(p);
+      if (source) {
+        close();
+        void useStore.getState().openPaths([source]);
+      } else {
+        setError("That link isn't a page published from this Mac. To get it as a new file, use File \u2192 Import from Link\u2026 (\u21e7\u2318I).");
+      }
+      return;
+    }
     const github = splitGithubSpec(p);
     const spec = github ? [p, github.host, github.path] : SPEC_RE.exec(p);
     if (spec && isValidHost(spec[1])) {
@@ -656,7 +668,7 @@ function Browser({ mode }: { mode: "open" | "save" }) {
           <span className="rb-colon">:</span>
           <input
             className="remote-prompt-input rb-path"
-            placeholder="~ for home, /abs/path, or paste host:/path or a GitHub link"
+            placeholder="~ for home, /abs/path, or paste host:/path, a GitHub link or a published page's link"
             title={pathDraft}
             value={pathDraft}
             spellCheck={false}
