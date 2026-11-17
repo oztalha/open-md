@@ -134,6 +134,9 @@ If a tool is only on your `PATH` through `~/.zshrc`, add its folder to `"path"`
 or give its full path as `command`. Folders under
 Downloads, Desktop, Documents and iCloud Drive are skipped, so macOS never asks
 to grant the app access to them.
+In `env` values, `$HOME`, `~/` and `$PATH` (the `PATH` above) are filled in,
+so `"env": { "PATH": "~/node22/bin:$PATH" }` puts a folder first, e.g. for a
+server that needs a newer Node than your default.
 
 ### `targets`
 
@@ -184,7 +187,9 @@ dialog lists them.
 *File → Import from Link…* can fetch one of its pages as markdown (a doc you
 first wrote in the browser, say). Paste the page's link; its id is read from
 the link with `urlTemplate`, and the steps run with `{id}` and `{url}`. One
-step must save `markdown`, the page's text. The page opens as a new document,
+step must save `markdown`, the page's text (a `command` step that prints JSON
+with `markdown` works too, e.g. a script that turns blocks into markdown).
+The page opens as a new document,
 and you save it on this Mac or on a remote host. Linked (the default), the
 next Publish updates that page with your markdown instead of making a new one.
 For example:

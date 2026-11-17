@@ -5,6 +5,12 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.21.15] — 2026-11-17
+
+### Added
+- An MCP server's `env` in publish.json can use `$HOME`, `~/` and `$PATH`, so
+  a server that needs a newer Node can get one first on its PATH.
+
 ## [0.21.14] — 2026-11-17
 
 ### Added
@@ -768,6 +774,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.21.15]: https://github.com/oztalha/open-md/releases/tag/v0.21.15
 [0.21.14]: https://github.com/oztalha/open-md/releases/tag/v0.21.14
 [0.21.13]: https://github.com/oztalha/open-md/releases/tag/v0.21.13
 [0.21.12]: https://github.com/oztalha/open-md/releases/tag/v0.21.12

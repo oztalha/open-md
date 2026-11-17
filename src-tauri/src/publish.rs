@@ -414,6 +414,16 @@ fn is_protected_dir(dir: &str) -> bool {
         })
 }
 
+/// A server's `env` value with `$HOME`, `$PATH` (the PATH OpenMD runs commands
+/// with) and `~/` at the start of each `:`-separated part filled in, so e.g.
+/// `"PATH": "~/.local/node22/bin:$PATH"` puts a folder in front.
+fn expand_env_value(v: &str) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let v = v.replace("$HOME", &home);
+    let v = if v.contains("$PATH") { v.replace("$PATH", login_path()) } else { v };
+    v.split(':').map(expand_home).collect::<Vec<_>>().join(":")
+}
+
 fn expand_home(s: &str) -> String {
     match s.strip_prefix("~/") {
         Some(rest) => format!("{}/{rest}", std::env::var("HOME").unwrap_or_default()),
@@ -519,7 +529,7 @@ impl Session {
 fn start_session(label: &str, server: &ServerCfg, allowed: HashSet<String>) -> Result<Session, String> {
     let mut child = base_command(&server.command)
         .args(&server.args)
-        .envs(&server.env)
+        .envs(server.env.iter().map(|(k, v)| (k, expand_env_value(v))))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -954,6 +964,15 @@ pub fn publish_place_image(file: String, dir: String) -> Result<String, String> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn env_values_expand() {
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(super::expand_env_value("~/a/bin:/usr/bin"), format!("{home}/a/bin:/usr/bin"));
+        assert_eq!(super::expand_env_value("$HOME/x"), format!("{home}/x"));
+        assert!(super::expand_env_value("~/n/bin:$PATH").starts_with(&format!("{home}/n/bin:")));
+        assert_eq!(super::expand_env_value("plain"), "plain");
+    }
+
     #[test]
     fn new_commands_need_confirmation() {
         let parse = |s: &str| serde_json::from_str::<super::Config>(s).unwrap();
