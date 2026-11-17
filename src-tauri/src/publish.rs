@@ -85,11 +85,19 @@ pub struct Target {
     /// Told to the webview instead of the command itself.
     #[serde(default, skip_deserializing, rename = "uploadsImages")]
     uploads_images: bool,
+    /// Told to the webview: `images.download` is set.
+    #[serde(default, skip_deserializing, rename = "downloadsImages")]
+    downloads_images: bool,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
 pub struct ImagesCfg {
+    #[serde(default)]
     command: String,
+    /// Downloads one of a page's images for Import from Link (`MDV_IMAGE_URL`,
+    /// `MDV_OUT_DIR`); prints the file it wrote (JSON `file`, or the path).
+    #[serde(default)]
+    download: Option<String>,
 }
 
 impl Target {
@@ -133,6 +141,7 @@ fn builtin(id: &str, label: &str, kind: &str) -> Target {
         format: None,
         images: None,
         uploads_images: false,
+        downloads_images: false,
     }
 }
 
@@ -169,7 +178,8 @@ fn load_config() -> Result<Config, String> {
                 for s in t.create.iter_mut().chain(t.update.iter_mut()).chain(t.import_steps.iter_mut()) {
                     s.run = s.command.is_some();
                 }
-                t.uploads_images = t.images.is_some();
+                t.uploads_images = t.images.as_ref().is_some_and(|i| !i.command.is_empty());
+                t.downloads_images = t.images.as_ref().is_some_and(|i| i.download.is_some());
             }
             if !config.targets.iter().any(|t| t.kind() == "pages" || t.id == "protected-page") {
                 config.targets.push(protected_page());
@@ -254,7 +264,12 @@ fn executables(config: &Config) -> std::collections::BTreeSet<String> {
             }
         }
         if let Some(images) = &target.images {
-            out.insert(format!("Target \"{}\" images: {}", target.id, images.command));
+            if !images.command.is_empty() {
+                out.insert(format!("Target \"{}\" images: {}", target.id, images.command));
+            }
+            if let Some(download) = &images.download {
+                out.insert(format!("Target \"{}\" image download: {download}", target.id));
+            }
         }
     }
     out
@@ -884,6 +899,57 @@ pub async fn publish_upload_image(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Download one image of an imported page with a target's `images.download`
+/// command (looked up in the config, never sent by the webview), into a new
+/// temp folder. Returns the file it wrote.
+#[tauri::command]
+pub async fn publish_download_image(target_id: String, url: String) -> Result<String, String> {
+    let target = find_target(&load_config()?, &target_id)?;
+    let command = target
+        .images
+        .clone()
+        .and_then(|i| i.download)
+        .ok_or_else(|| format!("{} has no \"images.download\" command", target.label))?;
+    if !url.starts_with("https://") {
+        return Err(format!("Not an https image link: {url}"));
+    }
+    let dir = temp_path("image", "image")?.parent().map(PathBuf::from).ok_or("no temp folder")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = base_command("/bin/sh");
+        cmd.args(["-c", &command]).env("MDV_IMAGE_URL", &url).env("MDV_OUT_DIR", &dir);
+        let out = run(cmd, &format!("{} (image download)", target.label))?;
+        let file = serde_json::from_str::<Value>(out.trim())
+            .ok()
+            .and_then(|v| v.get("file").and_then(Value::as_str).map(str::to_string))
+            .unwrap_or_else(|| out.trim().to_string());
+        let path = PathBuf::from(&file);
+        // Only a file the command wrote into its own folder.
+        if !path.starts_with(&dir) || !path.is_file() {
+            return Err(format!("{}: the image download didn't write a file in {}", target.label, dir.display()));
+        }
+        Ok(file)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Copy a downloaded image (from `publish_download_image`) into a folder on
+/// this Mac, creating it; returns the new file.
+#[tauri::command]
+pub fn publish_place_image(file: String, dir: String) -> Result<String, String> {
+    let src = PathBuf::from(&file);
+    let root = std::env::temp_dir().join("md-viewer-publish");
+    if !src.starts_with(&root) || !src.is_file() {
+        return Err("Only downloaded images can be placed".into());
+    }
+    let name = src.file_name().ok_or("no file name")?;
+    let dest_dir = PathBuf::from(&dir);
+    std::fs::create_dir_all(&dest_dir).map_err(|e| format!("Couldn't create {dir}: {e}"))?;
+    let dest = dest_dir.join(name);
+    std::fs::copy(&src, &dest).map_err(|e| format!("Couldn't copy into {dir}: {e}"))?;
+    Ok(dest.display().to_string())
 }
 
 #[cfg(test)]

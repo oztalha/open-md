@@ -195,6 +195,13 @@ For example:
 ]
 ```
 
+To bring an imported page's images along, add `"download"` to the
+target's `"images"`: a command run once per image of the page (on the page's
+own site), with `MDV_IMAGE_URL` (the image's link) and `MDV_OUT_DIR` (a folder
+to write it in). It prints the file it wrote (or JSON with `file`). The images
+go in an `images/` folder next to the document, and the markdown points at
+them; publishing again uploads them with the `images` command.
+
 Add `"format": "html"` to any target to publish the rendered HTML (like
 Export as HTML) instead of the markdown.
 

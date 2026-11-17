@@ -28,7 +28,12 @@ import {
   readTextFile,
   readRemoteBytes,
   publishUploadImage,
+  publishDownloadImage,
+  publishPlaceImage,
+  makeRemoteDir,
+  uploadRemote,
   publishWriteTempBytes,
+  showError,
   realPath,
   remoteStat,
   writePublishTemp,
@@ -37,7 +42,7 @@ import { isGithubHost, splitGithubSpec } from "./remote";
 import { encryptPage, MIN_PASSWORD, newPageId } from "./pageCrypt";
 import { INDEX_CSS, firstH1, parseIndex, renderIndexBody, withEntry, withoutEntry } from "./pageIndex";
 import type { IndexEntry } from "./pageIndex";
-import { localDocLinks, localImageRefs, resolveLink, rewriteImages, rewriteLinks } from "./docLinks";
+import { imageRefs, localDocLinks, localImageRefs, resolveLink, rewriteImages, rewriteLinks } from "./docLinks";
 import { idFromLink, protectedPageId } from "./publishSearch";
 import type { McpResult, PublishStep, PublishTarget } from "./ipc";
 
@@ -618,6 +623,85 @@ export interface ImportedPage {
   id: string;
   url: string;
   markdown: string;
+  /** Images downloaded for the page: temp file, and the `images/…` path the markdown now uses. */
+  images: { file: string; rel: string }[];
+  /** Images that couldn't be downloaded, with why (they keep their page link). */
+  imageErrors: string[];
+}
+
+/** The folder imported images go in, next to the document. */
+export const IMPORT_IMAGES_DIR = "images";
+
+/**
+ * Download the page's own images (on its site, with the target's
+ * `images.download` command) and point the markdown at `images/<name>`.
+ */
+async function downloadPageImages(
+  target: PublishTarget,
+  pageUrl: string,
+  markdown: string,
+): Promise<{ markdown: string; images: ImportedPage["images"]; imageErrors: string[] }> {
+  if (!target.downloadsImages) return { markdown, images: [], imageErrors: [] };
+  const origin = new URL(pageUrl).origin;
+  const images: ImportedPage["images"] = [];
+  const imageErrors: string[] = [];
+  const urls = new Map<string, string>();
+  await inParallel(imageRefs(markdown), 4, async (src) => {
+    let abs: URL;
+    try {
+      abs = new URL(src, pageUrl);
+    } catch {
+      return;
+    }
+    if (abs.origin !== origin) return; // other sites' images stay links
+    try {
+      const file = await publishDownloadImage(target.id, abs.href);
+      const rel = `${IMPORT_IMAGES_DIR}/${basename(file)}`;
+      images.push({ file, rel });
+      urls.set(src, rel);
+    } catch (err) {
+      imageErrors.push(`${src}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  });
+  return { markdown: rewriteImages(markdown, urls), images, imageErrors };
+}
+
+/** Copy imported images into the `images/` folder next to `doc` (on this Mac or its host). */
+export async function placeImportedImages(doc: Doc, images: ImportedPage["images"]): Promise<void> {
+  if (!images.length) return;
+  const where = doc.remote?.path ?? doc.path;
+  if (!where) return;
+  const dir = `${where.slice(0, where.lastIndexOf("/")) || "/"}/${IMPORT_IMAGES_DIR}`;
+  if (doc.remote) {
+    await makeRemoteDir(doc.remote.host, dir);
+    await uploadRemote(doc.remote.host, images.map((i) => i.file), dir);
+  } else {
+    for (const i of images) await publishPlaceImage(i.file, dir);
+  }
+}
+
+// Imported documents not saved yet, with the images to put next to them once they are.
+const pendingImages = new Map<string, ImportedPage["images"]>();
+
+/** Put `images` next to the document once it's saved somewhere (now, if it is). */
+export function placeImagesWhenSaved(docId: string, images: ImportedPage["images"]): void {
+  if (!images.length) return;
+  pendingImages.set(docId, images);
+  applyPendingImages();
+}
+
+function applyPendingImages(): void {
+  const docs = useStore.getState().docs;
+  for (const [docId, images] of pendingImages) {
+    const doc = docs[docId];
+    if (!doc) pendingImages.delete(docId);
+    else if (doc.path || doc.remote) {
+      pendingImages.delete(docId);
+      placeImportedImages(doc, images).catch((err) =>
+        showError(`Couldn't save the imported page's images next to it: ${err instanceof Error ? err.message : err}`),
+      );
+    }
+  }
 }
 
 /**
@@ -633,7 +717,7 @@ export async function importFromLink(targets: PublishTarget[], link: string): Pr
     const vars: Record<string, string> = { id, url };
     await runSteps(target, "import", vars);
     if (vars.markdown == null) throw new Error(`${target.label}: the import steps didn't save "markdown"`);
-    return { target, id, url, markdown: vars.markdown };
+    return { target, id, url, ...(await downloadPageImages(target, url, vars.markdown)) };
   }
   throw new Error(
     candidates.length
@@ -672,6 +756,7 @@ export function awaitingLink(doc: Doc | undefined): boolean {
 export function initImportLinks(): void {
   useStore.subscribe((s, prev) => {
     if (pendingLinks.size && s.docs !== prev.docs) applyPendingLinks();
+    if (pendingImages.size && s.docs !== prev.docs) applyPendingImages();
   });
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store";
-import { publishTargets } from "../ipc";
+import { publishTargets, showError } from "../ipc";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import type { PublishTarget } from "../ipc";
 import {
@@ -11,6 +11,8 @@ import {
   publishedFor,
   localLinksFor,
   pageForLink,
+  placeImagesWhenSaved,
+  placeImportedImages,
   replaceDocText,
 } from "../publish";
 import { restoreLinks } from "../docLinks";
@@ -90,6 +92,13 @@ function Import() {
     ? `${basename(sourceFile)}${sourceFile.startsWith("/") ? "" : ` (${sourceFile.split(":")[0]})`}`
     : "";
 
+  const reportImages = (errors: string[]) => {
+    if (errors.length)
+      void showError(
+        `${errors.length} image${errors.length === 1 ? "" : "s"} couldn't be downloaded and still point at the page:\n\n${errors.slice(0, 5).join("\n")}`,
+      );
+  };
+
   const run = async () => {
     if (!targets || !link.trim()) return;
     setBusy(true);
@@ -104,12 +113,16 @@ function Import() {
         // Links to pages published from files here point at those files again.
         const markdown = restoreLinks(page.markdown, localLinksFor(doc, page.target.id));
         if (!(await replaceDocText(doc.id, markdown))) throw new Error(`Couldn't open ${fileLabel}.`);
+        await placeImportedImages(doc, page.images);
         close();
+        reportImages(page.imageErrors);
         return;
       }
       const docId = s.newDocWith(fileNameFor(page.markdown, page.id), page.markdown);
       if (keepLinked) linkWhenSaved(docId, page.target, page.url);
+      placeImagesWhenSaved(docId, page.images);
       close();
+      reportImages(page.imageErrors);
       // Saving gives it a place on disk, which is what a link is kept by.
       if (where === "remote") s.setRemoteBrowser("save");
       else await s.saveDoc(docId, true);

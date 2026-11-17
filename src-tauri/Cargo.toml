@@ -1,6 +1,6 @@
 [package]
 name = "open-md"
-version = "0.21.13"
+version = "0.21.14"
 description = "A minimal, fast, native-feeling markdown editor/viewer for macOS."
 authors = ["Max Leiter"]
 license = "MIT"

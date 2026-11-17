@@ -223,6 +223,8 @@ export interface PublishTarget {
   format?: "markdown" | "html";
   /** The target has an `images` command that uploads a document's images. */
   uploadsImages?: boolean;
+  /** The target has an `images.download` command (images of imported pages). */
+  downloadsImages?: boolean;
   /** Fetches a page as markdown (File → Import from Link…); a step saves `markdown`. */
   import?: PublishStep[];
 }
@@ -230,6 +232,16 @@ export interface PublishTarget {
 /** Upload one local image with a target's `images` command; returns its link. */
 export function publishUploadImage(targetId: string, id: string, image: string, name: string): Promise<string> {
   return invoke<string>("publish_upload_image", { targetId, id, image, name });
+}
+
+/** Download one image of an imported page with a target's `images.download` command. */
+export function publishDownloadImage(targetId: string, url: string): Promise<string> {
+  return invoke<string>("publish_download_image", { targetId, url });
+}
+
+/** Copy a downloaded image into a local folder (created if needed); returns the new path. */
+export function publishPlaceImage(file: string, dir: string): Promise<string> {
+  return invoke<string>("publish_place_image", { file, dir });
 }
 
 /** Write bytes (base64) to a temp file for an upload; returns its path. */

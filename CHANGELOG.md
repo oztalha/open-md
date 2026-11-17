@@ -5,6 +5,14 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.21.14] — 2026-11-17
+
+### Added
+- Import from Link brings the page's images along: they go in an `images/`
+  folder next to the file (on this Mac or the remote host), and the markdown
+  points at them. Needs an `images.download` command on the target
+  (docs/PUBLISHING.md); images that can't be downloaded keep their page link.
+
 ## [0.21.13] — 2026-11-09
 
 ### Changed
@@ -760,6 +768,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.21.14]: https://github.com/oztalha/open-md/releases/tag/v0.21.14
 [0.21.13]: https://github.com/oztalha/open-md/releases/tag/v0.21.13
 [0.21.12]: https://github.com/oztalha/open-md/releases/tag/v0.21.12
 [0.21.11]: https://github.com/oztalha/open-md/releases/tag/v0.21.11

@@ -1165,6 +1165,8 @@ pub fn run() {
             publish::publish_step_command,
             publish::publish_write_temp_bytes,
             publish::publish_upload_image,
+            publish::publish_download_image,
+            publish::publish_place_image,
             github::github_resolve_url,
             github::gh_accounts,
             write_remote,

@@ -152,6 +152,11 @@ export function localImageRefs(markdown: string): string[] {
   return [...new Set(linkSpans(markdown).filter((s) => s.image).map((s) => s.href).filter(isLocalImageSrc))];
 }
 
+/** Every image source in the document (local or not), once each. */
+export function imageRefs(markdown: string): string[] {
+  return [...new Set(linkSpans(markdown).filter((s) => s.image).map((s) => s.href))];
+}
+
 /** Replace image sources: each src found in `urls` becomes its URL. */
 export function rewriteImages(markdown: string, urls: Map<string, string>): string {
   return replaceSpans(markdown, linkSpans(markdown).filter((s) => s.image), (s) => urls.get(s.href));
