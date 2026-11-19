@@ -3663,6 +3663,14 @@ input[type="radio"]:disabled {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.file-search-name-hit {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.file-search-name-hit .sidebar-hint {
+  flex: none;
+}
 .file-search-hit {
   all: unset;
   display: flex;

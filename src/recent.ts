@@ -5,12 +5,14 @@ export interface RecentEntry {
   /** Open spec: a local path or an mdviewer:// URL. */
   spec: string;
   label: string;
+  /** When it was last opened or saved (ms); missing on entries from older versions. */
+  at?: number;
 }
 
 const STORAGE_KEY = "recentFiles";
 const PINS_KEY = "pinnedFiles";
-/** Sidebar keeps the last 100 (it scrolls); the native menu shows the newest 20. */
-const MAX = 100;
+/** Sidebar keeps the last 500 (it scrolls); the native menu shows the newest 20. */
+const MAX = 500;
 const MENU_MAX = 20;
 
 function load(): RecentEntry[] {
@@ -72,10 +74,12 @@ export function isPinned(spec: string): boolean {
 /** Pin a file (moves it out of Recent), or unpin it (back into Recent). */
 export function togglePin(spec: string, label: string): void {
   if (isPinned(spec)) {
+    const at = pins.find((e) => e.spec === spec)?.at;
     pins = pins.filter((e) => e.spec !== spec);
-    entries = [{ spec, label }, ...entries.filter((e) => e.spec !== spec)].slice(0, MAX);
+    entries = [{ spec, label, at }, ...entries.filter((e) => e.spec !== spec)].slice(0, MAX);
   } else {
-    pins = [...pins, { spec, label }];
+    const at = entries.find((e) => e.spec === spec)?.at;
+    pins = [...pins, { spec, label, at }];
     entries = entries.filter((e) => e.spec !== spec);
   }
   persist();
@@ -111,12 +115,25 @@ export function reorderPin(spec: string, toIndex: number): void {
 export function addRecent(spec: string, label: string): void {
   // A pinned file stays in Pinned; only its label refreshes.
   if (isPinned(spec)) {
-    pins = pins.map((e) => (e.spec === spec ? { spec, label } : e));
+    pins = pins.map((e) => (e.spec === spec ? { spec, label, at: Date.now() } : e));
     persist();
     return;
   }
-  entries = [{ spec, label }, ...entries.filter((e) => e.spec !== spec)].slice(0, MAX);
+  entries = [{ spec, label, at: Date.now() }, ...entries.filter((e) => e.spec !== spec)].slice(0, MAX);
   persist();
+}
+
+/** When a recent file was last opened, short: "14:05" today, "Yesterday", "Mon", "Nov 3", "Nov 3, 2025". */
+export function recentWhen(at: number | undefined, now = Date.now()): string {
+  if (!at) return "";
+  const d = new Date(at);
+  const day = (t: number) => new Date(t).setHours(0, 0, 0, 0);
+  const days = Math.round((day(now) - day(at)) / 86_400_000);
+  if (days <= 0) return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (days === 1) return "Yesterday";
+  if (days < 7) return d.toLocaleDateString(undefined, { weekday: "short" });
+  const sameYear = new Date(now).getFullYear() === d.getFullYear();
+  return d.toLocaleDateString(undefined, sameYear ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
 }
 
 /** Clear Recent; pinned files stay. */

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useStore } from "../store";
 import { useSettings } from "../settings";
-import { getRecents } from "../recent";
+import { getPins, getRecents } from "../recent";
 import { parseOpenSpec, remoteUrl, isGithubHost } from "../remote";
 import { getEditorView } from "../editor/registry";
 import { revealLine } from "../reveal";
@@ -13,6 +13,7 @@ import type { LineHit, SearchOptions } from "../fileSearch";
 
 const OPTS_KEY = "fileSearchOptions";
 const SCOPE_KEY = "fileSearchScope";
+const NAMES_KEY = "fileSearchNamesOnly";
 
 type Scope = "open" | "all";
 
@@ -25,6 +26,8 @@ interface FileResult {
   host?: string;
   path: string;
   hits: LineHit[];
+  /** File names mode: the name matched (no line hits). */
+  byName?: boolean;
 }
 
 function loadOpts(): SearchOptions {
@@ -45,6 +48,8 @@ export function FileSearch({ children }: { children: ReactNode }) {
   const [query, setQuery] = useState("");
   const [opts, setOpts] = useState<SearchOptions>(loadOpts);
   const [scope, setScope] = useState<Scope>(() => (localStorage.getItem(SCOPE_KEY) === "open" ? "open" : "all"));
+  // File names only: filter open and recent files by name, never their contents.
+  const [namesOnly, setNamesOnly] = useState(() => localStorage.getItem(NAMES_KEY) === "1");
   const [results, setResults] = useState<FileResult[]>([]);
   const [problems, setProblems] = useState<string[]>([]);
   const [pending, setPending] = useState(0);
@@ -100,7 +105,7 @@ export function FileSearch({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer);
     // `re` follows query + opts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, opts, scope]);
+  }, [query, opts, scope, namesOnly]);
 
   const run = async (id: number) => {
     const live = () => id === request.current;
@@ -114,6 +119,43 @@ export function FileSearch({ children }: { children: ReactNode }) {
     };
     setResults([]);
     setProblems([]);
+
+    if (namesOnly) {
+      const re = matcher(query, opts)!;
+      const test = (name: string) => {
+        re.lastIndex = 0;
+        return re.test(name);
+      };
+      const seen = new Set<string>();
+      const named: FileResult[] = [];
+      s.tabs.forEach((docId, order) => {
+        const doc = s.docs[docId];
+        if (!doc) return;
+        const spec = doc.remote ? remoteUrl(doc.remote) : (doc.path ?? `unsaved:${doc.id}`);
+        seen.add(spec);
+        const name = doc.path || doc.remote ? basename(doc.remote?.path ?? doc.path ?? "") : displayTitle(doc);
+        if (!test(name)) return;
+        const where = doc.remote ? doc.remote.host : doc.path ? "local" : "unsaved";
+        named.push({ order, label: name, where, docId: doc.id, host: doc.remote?.host, path: doc.remote?.path ?? doc.path ?? "", hits: [], byName: true });
+      });
+      if (scope === "all") {
+        const defaultHost = useSettings.getState().settings.defaultRemoteHost ?? "";
+        [...getPins(), ...getRecents()].forEach((entry, i) => {
+          if (seen.has(entry.spec)) return;
+          seen.add(entry.spec);
+          const spec = parseOpenSpec(entry.spec, defaultHost);
+          const host = spec.kind === "remote" ? spec.ref.host : undefined;
+          const path = spec.kind === "remote" ? spec.ref.path : spec.path;
+          if (!test(basename(path))) return;
+          named.push({ order: 1000 + i, label: basename(path), where: host ?? "local", host, path, hits: [], byName: true });
+        });
+      }
+      if (live()) {
+        setResults(named);
+        setPending(0);
+      }
+      return;
+    }
 
     // Open documents: in memory.
     const openSpecs = new Set<string>();
@@ -179,6 +221,16 @@ export function FileSearch({ children }: { children: ReactNode }) {
     setOpts(next);
     localStorage.setItem(OPTS_KEY, JSON.stringify(next));
   };
+  const toggleNames = () => {
+    setNamesOnly(!namesOnly);
+    localStorage.setItem(NAMES_KEY, namesOnly ? "0" : "1");
+  };
+  const openByName = (r: FileResult) => {
+    const s = useStore.getState();
+    if (r.docId && s.docs[r.docId]) s.selectTab(r.docId);
+    else if (r.host) void s.openRemote(r.host, r.path);
+    else void s.openPaths([r.path]);
+  };
   const changeScope = (next: Scope) => {
     setScope(next);
     localStorage.setItem(SCOPE_KEY, next);
@@ -199,7 +251,11 @@ export function FileSearch({ children }: { children: ReactNode }) {
   const total = results.reduce((n, r) => n + r.hits.length, 0);
   const status = invalid
     ? "Bad pattern"
-    : pending > 0
+    : namesOnly
+      ? results.length
+        ? `${results.length} file${results.length === 1 ? "" : "s"}`
+        : "No matching file names"
+      : pending > 0
       ? `Searching… ${total ? `${total} so far` : ""}`
       : total
         ? `${total} match${total === 1 ? "" : "es"} in ${results.length} file${results.length === 1 ? "" : "s"}`
@@ -212,7 +268,7 @@ export function FileSearch({ children }: { children: ReactNode }) {
           <input
             ref={input}
             className="file-search-input"
-            placeholder="Search in files"
+            placeholder={namesOnly ? "Filter file names" : "Search in files"}
             value={query}
             spellCheck={false}
             autoCorrect="off"
@@ -236,6 +292,13 @@ export function FileSearch({ children }: { children: ReactNode }) {
           <button className={`find-opt${opts.regex ? " on" : ""}`} data-tip="Regular expression" onClick={() => toggle("regex")}>
             .*
           </button>
+          <button
+            className={`find-opt${namesOnly ? " on" : ""}`}
+            data-tip={namesOnly ? "Searching file names only (click to search contents)" : "File names only"}
+            onClick={toggleNames}
+          >
+            <span className="find-word">N</span>
+          </button>
         </div>
         {query && (
           <div className="file-search-meta">
@@ -254,6 +317,25 @@ export function FileSearch({ children }: { children: ReactNode }) {
       {query ? (
         <div className="file-search-results">
           {re &&
+            namesOnly &&
+            results.map((r) => (
+              <button
+                key={`${r.where}:${r.path}:${r.docId ?? ""}`}
+                className="file-search-hit file-search-name-hit"
+                title={r.host ? `${r.host}:${r.path}` : r.path}
+                onClick={() => openByName(r)}
+              >
+                <span className="file-search-text">
+                  {snippet(r.label, re).map((p, i) => (p.match ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>))}
+                </span>
+                <span className="sidebar-hint">
+                  {r.docId ? "open · " : ""}
+                  {r.where}
+                </span>
+              </button>
+            ))}
+          {re &&
+            !namesOnly &&
             results.map((r) => (
               <div key={`${r.where}:${r.path}:${r.docId ?? ""}`} className="file-search-file">
                 <div className="file-search-file-name" title={r.host ? `${r.host}:${r.path}` : r.path}>

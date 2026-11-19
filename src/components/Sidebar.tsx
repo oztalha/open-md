@@ -6,6 +6,7 @@ import {
   clearRecents,
   getPins,
   getRecents,
+  recentWhen,
   removeRecent,
   reorderPin,
   reorderRecent,
@@ -363,7 +364,14 @@ export function Sidebar() {
                       <span className="sidebar-name" title={r.title}>
                         {r.name}
                       </span>
-                      {r.hint && <span className="sidebar-hint">{r.hint}</span>}
+                      {(r.hint || entry.at) && (
+                        <span
+                          className="sidebar-hint"
+                          title={entry.at ? `Last opened ${new Date(entry.at).toLocaleString()}` : undefined}
+                        >
+                          {[r.hint, recentWhen(entry.at)].filter(Boolean).join(" · ")}
+                        </span>
+                      )}
                       <button
                         className="sidebar-close"
                         data-tip="Remove from recents"

@@ -5,6 +5,17 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.21.16] — 2026-11-19
+
+### Added
+- Search in Files: the N button switches to file names only, filtering open,
+  pinned and recent files by name (with match case, whole word and regex),
+  never their contents.
+- Recent files show when you last opened them (time today, Yesterday, the
+  weekday, or the date; hover for the full time). Recent now keeps 500 files
+  (it was 100). Files opened before this version get a date the next time
+  you open them.
+
 ## [0.21.15] — 2026-11-17
 
 ### Added
@@ -774,6 +785,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.21.16]: https://github.com/oztalha/open-md/releases/tag/v0.21.16
 [0.21.15]: https://github.com/oztalha/open-md/releases/tag/v0.21.15
 [0.21.14]: https://github.com/oztalha/open-md/releases/tag/v0.21.14
 [0.21.13]: https://github.com/oztalha/open-md/releases/tag/v0.21.13
