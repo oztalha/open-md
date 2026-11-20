@@ -5,6 +5,11 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+### Added
+- `scripts/install.sh`: installs or updates OpenMD from the latest release in
+  one Terminal command (see the README), without the "Apple could not
+  verify" warning a browser download gets.
+
 ## [0.21.16] — 2026-11-19
 
 ### Added
