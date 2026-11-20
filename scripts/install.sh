@@ -7,7 +7,6 @@
 # private repo), else curl.
 #
 #   curl -fsSL https://raw.githubusercontent.com/oztalha/open-md/main/scripts/install.sh | sh
-#   gh api repos/oztalha/open-md/contents/scripts/install.sh -H 'Accept: application/vnd.github.raw' | sh
 set -eu
 
 REPO="oztalha/open-md"

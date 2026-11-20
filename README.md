@@ -34,12 +34,10 @@ opens it, with no "Apple could not verify" warning, because the app isn't
 downloaded through a browser:
 
 ```sh
-gh api repos/oztalha/open-md/contents/scripts/install.sh -H 'Accept: application/vnd.github.raw' | sh
+curl -fsSL https://raw.githubusercontent.com/oztalha/open-md/main/scripts/install.sh | sh
 ```
 
-(That uses the [GitHub CLI](https://cli.github.com), `gh`, signed in. With
-the repository public, `curl -fsSL https://raw.githubusercontent.com/oztalha/open-md/main/scripts/install.sh | sh`
-works too.)
+Run it again any time to update to the latest version.
 
 **Or download it:** **[Download the latest DMG](https://github.com/oztalha/open-md/releases/latest/download/OpenMD_aarch64.dmg)**
 ([release notes](https://github.com/oztalha/open-md/releases/latest)), open
