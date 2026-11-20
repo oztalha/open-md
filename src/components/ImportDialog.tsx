@@ -177,7 +177,19 @@ function Import() {
               <div className="publish-checks">
                 {updating && (
                   <p className="publish-status">
-                    Published from <strong>{fileLabel}</strong>. Import puts the page's text into that file as unsaved
+                    Published from{" "}
+                    <button
+                      type="button"
+                      className="import-source-link"
+                      title={`Open ${sourceFile} without importing`}
+                      onClick={() => {
+                        close();
+                        if (sourceFile) void useStore.getState().openPaths([sourceFile]);
+                      }}
+                    >
+                      {fileLabel}
+                    </button>
+                    . Import puts the page's text into that file as unsaved
                     changes: review them, then ⌘S to keep them or ⌘Z to undo.
                   </p>
                 )}

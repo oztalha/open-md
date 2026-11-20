@@ -2515,7 +2515,7 @@ dependencies = [
 
 [[package]]
 name = "open-md"
-version = "0.21.16"
+version = "0.21.17"
 dependencies = [
  "base64 0.22.1",
  "core-foundation",

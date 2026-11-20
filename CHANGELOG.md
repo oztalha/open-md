@@ -5,10 +5,20 @@ the format is based on [Keep a Changelog](https://keepachangelog.com).
 
 ## [Unreleased]
 
+## [0.21.17] — 2026-11-20
+
 ### Added
+- Import from Link: the file a page was published from is a link; click it to
+  open the file without importing.
 - `scripts/install.sh`: installs or updates OpenMD from the latest release in
   one Terminal command (see the README), without the "Apple could not
   verify" warning a browser download gets.
+
+### Fixed
+- Published Documents didn't list pages a file was linked to (by Import from
+  Link or Link to existing page) until it was published from here; it lists
+  them now, so their link finds the file. Searching ignores brackets, quotes
+  and trailing punctuation pasted with a name, e.g. "notes.md (cdd).".
 
 ## [0.21.16] — 2026-11-19
 
@@ -790,6 +800,7 @@ Initial version: semi-WYSIWYG markdown editor with live preview, tiled panes,
 CSV/TSV tables, preview annotations, Prettier formatting, HTML export, and
 opening/editing files over SSH.
 
+[0.21.17]: https://github.com/oztalha/open-md/releases/tag/v0.21.17
 [0.21.16]: https://github.com/oztalha/open-md/releases/tag/v0.21.16
 [0.21.15]: https://github.com/oztalha/open-md/releases/tag/v0.21.15
 [0.21.14]: https://github.com/oztalha/open-md/releases/tag/v0.21.14

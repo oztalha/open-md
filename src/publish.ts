@@ -222,7 +222,18 @@ export function publishedPages(
   _version = 0,
 ): (PublishLogEntry & { first: number; updates: number })[] {
   const byUrl = new Map<string, PublishLogEntry & { first: number; updates: number }>();
-  for (const e of loadLog()) {
+  // Pages a document was linked to (Import from Link, Link to existing page)
+  // have a record but no publish in the log: list them too.
+  const log = loadLog();
+  const logged = new Set(log.map((e) => e.url));
+  const linked: PublishLogEntry[] = [];
+  for (const [key, byTarget] of Object.entries(loadRecords())) {
+    for (const [target, rec] of Object.entries(byTarget)) {
+      if (!rec.url || logged.has(rec.url)) continue;
+      linked.push({ ...whereFromKey(key), key, title: "", target, targetLabel: target, id: rec.id, url: rec.url, at: rec.at, updated: false });
+    }
+  }
+  for (const e of [...log, ...linked]) {
     const page = byUrl.get(e.url);
     if (!page) byUrl.set(e.url, { ...e, first: e.at, updates: 0 });
     else byUrl.set(e.url, { ...e, title: e.title || page.title, first: page.first, updates: page.updates + 1 });
@@ -509,6 +520,20 @@ export function linkExistingPage(doc: Doc, target: PublishTarget, link: string):
           : String(fill(target.urlTemplate ?? "", { id }));
   const record = { id, url, at: Date.now() };
   saveRecord(doc, target.id, record);
+  const key = recordKey(doc);
+  if (key)
+    appendLog({
+      key,
+      host: doc.remote?.host,
+      path: doc.remote?.path ?? doc.path ?? key,
+      title: displayTitle(doc),
+      target: target.id,
+      targetLabel: target.label,
+      id,
+      url,
+      at: record.at,
+      updated: false,
+    });
   useStore.getState().bumpPublished();
   return record;
 }

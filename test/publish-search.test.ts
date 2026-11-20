@@ -41,3 +41,9 @@ test("protected-page links: github.io or the account's custom domain", () => {
   expect(protectedPageId("https://example.org/md-viewer-pages/short.html")).toBeNull();
   expect(idFromLink(`https://example.org/md-viewer-pages/${id}.html`, { kind: "pages" })).toBe(id);
 });
+
+test("words pasted from a label still match", () => {
+  const page = { title: "", key: "cdd:/w/10 CRs a Day w- SIR Autopilot.md", url: "https://notes.example.com/doc/y3HQoRP8Mrgj", id: "y3HQoRP8Mrgj", targetLabel: "Notes" };
+  expect(pageMatches(page, "10 CRs a Day w- SIR Autopilot.md (cdd).")).toBe(true);
+  expect(pageMatches(page, "\u201cAutopilot.md\u201d")).toBe(true);
+});

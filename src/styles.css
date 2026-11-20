@@ -3711,3 +3711,16 @@ input[type="radio"]:disabled {
   font-size: 11.5px;
   color: var(--fg-faint);
 }
+
+/* Import from Link: the file a page was published from, clickable to open it. */
+.import-source-link {
+  all: unset;
+  font-weight: 700;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.import-source-link:hover {
+  color: var(--fg);
+}

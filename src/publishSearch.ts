@@ -19,7 +19,13 @@ export function pageMatches(page: Searchable, query: string): boolean {
   const url = page.url.toLowerCase();
   if (q.includes(url) || (page.id.length >= 6 && q.includes(page.id.toLowerCase()))) return true;
   const haystack = [page.title, page.key, url, page.targetLabel].join("\n").toLowerCase();
-  return q.split(/\s+/).every((word) => haystack.includes(word));
+  // Words as pasted from a label like "notes.md (cdd)." still match: brackets,
+  // quotes and trailing punctuation around a word don't count.
+  const words = q
+    .split(/\s+/)
+    .map((w) => w.replace(/^[("'\u201c\u2018[]+|[)"'\u201d\u2019\],.;:!?]+$/g, ""))
+    .filter(Boolean);
+  return words.every((word) => haystack.includes(word));
 }
 
 /**
